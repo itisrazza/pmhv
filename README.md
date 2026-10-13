@@ -39,6 +39,7 @@ QEMU also emulates foreign architectures (slowly), so x86 guests can run on an A
 - [Design](docs/design.md) — architecture, backends, consoles, networking, API, security
 - [Roadmap](docs/roadmap.md) — milestones to the MVP and beyond
 - [Development](docs/development.md) — prerequisites, `just` recipes, testing and conventions
+- [Issues](docs/issues.md) — known bugs in pmhv and in the projects it depends on, to fix upstream
 
 ## Licence
 
