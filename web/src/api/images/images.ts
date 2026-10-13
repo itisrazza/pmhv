@@ -6,22 +6,30 @@
  * OpenAPI spec version: 0.1.0
  */
 import {
+  useMutation,
   useQuery
 } from '@tanstack/react-query';
 import type {
   DataTag,
   DefinedInitialDataOptions,
   DefinedUseQueryResult,
+  MutationFunction,
   QueryClient,
   QueryFunction,
   QueryKey,
   UndefinedInitialDataOptions,
+  UseMutationOptions,
+  UseMutationResult,
   UseQueryOptions,
   UseQueryResult
 } from '@tanstack/react-query';
 
 import type {
-  ImageGroup
+  ApiError,
+  CreateImageRequest,
+  ImageGroup,
+  ImageRef,
+  ResizeImageRequest
 } from '../schemas';
 
 import { apiClient } from '../../lib/api-client';
@@ -141,3 +149,333 @@ export function useListImages<TData = Awaited<ReturnType<typeof listImages>>, TE
 
 
 
+export const getCreateImageUrl = () => {
+
+
+
+
+  return `/api/v1/images`
+}
+
+export const createImage = async (createImageRequest: CreateImageRequest, options?: Parameters<typeof apiClient>[1]): Promise<ImageRef> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiClient<ImageRef>(getCreateImageUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createImageRequest)
+  }
+);}
+
+
+
+
+
+export const getCreateImageMutationKey = () => ['createImage'] as const;
+
+export const getCreateImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createImage>>, TError,CreateImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof createImage>>, TError,CreateImageMutationVariables, TContext> => {
+
+const mutationKey = getCreateImageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createImage>>, CreateImageMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createImage(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateImageMutationResult = NonNullable<Awaited<ReturnType<typeof createImage>>>
+    export type CreateImageMutationBody = CreateImageRequest
+    export type CreateImageMutationError = ErrorType<ApiError>
+    export type CreateImageMutationVariables = {data: CreateImageRequest}
+
+    export const useCreateImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createImage>>, TError,CreateImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof createImage>>,
+        TError,
+        CreateImageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateImageMutationOptions(options), queryClient);
+    }
+    export const getUploadImageUrl = (group: string,
+    name: string,) => {
+
+
+
+
+  return `/api/v1/images/${group}/${name}`
+}
+
+/**
+ * @summary Uploads an image file as the request body. Existing images aren't replaced.
+ */
+export const uploadImage = async (group: string,
+    name: string,
+    uploadImageBody: Blob, options?: Parameters<typeof apiClient>[1]): Promise<ImageRef> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiClient<ImageRef>(getUploadImageUrl(group,name),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream', ...getHeaders(options?.headers) },
+    body: uploadImageBody
+  }
+);}
+
+
+
+
+
+export const getUploadImageMutationKey = () => ['uploadImage'] as const;
+
+export const getUploadImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImage>>, TError,UploadImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof uploadImage>>, TError,UploadImageMutationVariables, TContext> => {
+
+const mutationKey = getUploadImageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof uploadImage>>, UploadImageMutationVariables> = (props) => {
+          const {group,name,data} = props ?? {};
+
+          return  uploadImage(group,name,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UploadImageMutationResult = NonNullable<Awaited<ReturnType<typeof uploadImage>>>
+    export type UploadImageMutationBody = Blob
+    export type UploadImageMutationError = ErrorType<ApiError>
+    export type UploadImageMutationVariables = {group: string;name: string;data: Blob}
+
+    /**
+ * @summary Uploads an image file as the request body. Existing images aren't replaced.
+ */
+export const useUploadImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof uploadImage>>, TError,UploadImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof uploadImage>>,
+        TError,
+        UploadImageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUploadImageMutationOptions(options), queryClient);
+    }
+    export const getDeleteImageUrl = (group: string,
+    name: string,) => {
+
+
+
+
+  return `/api/v1/images/${group}/${name}`
+}
+
+/**
+ * @summary Deletes an image that no machine has attached.
+ */
+export const deleteImage = async (group: string,
+    name: string, options?: Parameters<typeof apiClient>[1]): Promise<void> => {
+
+  return apiClient<void>(getDeleteImageUrl(group,name),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteImageMutationKey = () => ['deleteImage'] as const;
+
+export const getDeleteImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImage>>, TError,DeleteImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteImage>>, TError,DeleteImageMutationVariables, TContext> => {
+
+const mutationKey = getDeleteImageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteImage>>, DeleteImageMutationVariables> = (props) => {
+          const {group,name} = props ?? {};
+
+          return  deleteImage(group,name,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteImageMutationResult = NonNullable<Awaited<ReturnType<typeof deleteImage>>>
+
+    export type DeleteImageMutationError = ErrorType<ApiError>
+    export type DeleteImageMutationVariables = {group: string;name: string}
+
+    /**
+ * @summary Deletes an image that no machine has attached.
+ */
+export const useDeleteImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteImage>>, TError,DeleteImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof deleteImage>>,
+        TError,
+        DeleteImageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteImageMutationOptions(options), queryClient);
+    }
+    export const getResizeImageUrl = (group: string,
+    name: string,) => {
+
+
+
+
+  return `/api/v1/images/${group}/${name}/resize`
+}
+
+export const resizeImage = async (group: string,
+    name: string,
+    resizeImageRequest: ResizeImageRequest, options?: Parameters<typeof apiClient>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiClient<void>(getResizeImageUrl(group,name),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(resizeImageRequest)
+  }
+);}
+
+
+
+
+
+export const getResizeImageMutationKey = () => ['resizeImage'] as const;
+
+export const getResizeImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resizeImage>>, TError,ResizeImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof resizeImage>>, TError,ResizeImageMutationVariables, TContext> => {
+
+const mutationKey = getResizeImageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resizeImage>>, ResizeImageMutationVariables> = (props) => {
+          const {group,name,data} = props ?? {};
+
+          return  resizeImage(group,name,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ResizeImageMutationResult = NonNullable<Awaited<ReturnType<typeof resizeImage>>>
+    export type ResizeImageMutationBody = ResizeImageRequest
+    export type ResizeImageMutationError = ErrorType<ApiError>
+    export type ResizeImageMutationVariables = {group: string;name: string;data: ResizeImageRequest}
+
+    export const useResizeImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resizeImage>>, TError,ResizeImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof resizeImage>>,
+        TError,
+        ResizeImageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getResizeImageMutationOptions(options), queryClient);
+    }

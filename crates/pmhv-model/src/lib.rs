@@ -13,7 +13,9 @@ pub use auth::{AuthStatus, LoginRequest, SetPasswordRequest, TemporaryPassword};
 pub use error::ApiError;
 pub use event::Event;
 pub use host::HostInfo;
-pub use image::{ImageFormat, ImageGroup, ImageInfo};
+pub use image::{
+    CreateImageRequest, ImageFormat, ImageGroup, ImageInfo, ImageUser, ResizeImageRequest,
+};
 pub use machine::{
     Arch, Backend, ConsoleKind, CreateMachineRequest, DiskBus, DiskMedia, DiskSpec, Firmware,
     GuestOs, ImageRef, Machine, MachineId, MachineSpec, MachineState, NetworkSpec, NewDisk,

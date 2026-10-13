@@ -171,6 +171,209 @@
             }
           }
         }
+      },
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "operationId": "createImage",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageRef"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An image with that name exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/images/{group}/{name}": {
+      "put": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Uploads an image file as the request body. Existing images aren't replaced.",
+        "operationId": "uploadImage",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Uploaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageRef"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An image with that name exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Deletes an image that no machine has attached.",
+        "operationId": "deleteImage",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "A machine uses it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/images/{group}/{name}/resize": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "operationId": "resizeImage",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResizeImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Resized"
+          },
+          "409": {
+            "description": "A running machine uses it",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Would shrink, or it's an ISO",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/machines": {
@@ -487,6 +690,29 @@
           "graphical"
         ]
       },
+      "CreateImageRequest": {
+        "type": "object",
+        "description": "A new, empty qcow2 image.",
+        "required": [
+          "group",
+          "name",
+          "size_gib"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "File name, ending in `.qcow2`."
+          },
+          "size_gib": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
       "CreateMachineRequest": {
         "type": "object",
         "required": [
@@ -660,7 +886,8 @@
           "name",
           "format",
           "allocated_bytes",
-          "virtual_bytes"
+          "virtual_bytes",
+          "used_by"
         ],
         "properties": {
           "allocated_bytes": {
@@ -677,6 +904,13 @@
           },
           "name": {
             "type": "string"
+          },
+          "used_by": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageUser"
+            },
+            "description": "Machines with this image attached."
           },
           "virtual_bytes": {
             "type": "integer",
@@ -695,6 +929,21 @@
         ],
         "properties": {
           "group": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ImageUser": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
             "type": "string"
           },
           "name": {
@@ -869,6 +1118,20 @@
         "properties": {
           "action": {
             "$ref": "#/components/schemas/PowerAction"
+          }
+        }
+      },
+      "ResizeImageRequest": {
+        "type": "object",
+        "description": "Grows an image. Shrinking isn't offered: it truncates whatever the guest stored at the end.",
+        "required": [
+          "size_gib"
+        ],
+        "properties": {
+          "size_gib": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         }
       },

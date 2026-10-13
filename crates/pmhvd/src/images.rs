@@ -29,6 +29,20 @@ pub enum ImageError {
     Spawn { program: PathBuf, source: io::Error },
     #[error("{program} failed: {stderr}")]
     Tool { program: PathBuf, stderr: String },
+    #[error("{group}/{name} is attached to {}; detach it first", .machines.join(", "))]
+    InUse {
+        group: String,
+        name: String,
+        machines: Vec<String>,
+    },
+    #[error(
+        "{name} is {current} bytes; it can only grow (shrinking would cut off the guest's data)"
+    )]
+    WouldShrink { name: String, current: u64 },
+    #[error("ISO images can't be resized")]
+    ResizeIso,
+    #[error("upload failed")]
+    Upload(#[source] axum::Error),
     #[error("unexpected output from qemu-img info for {path}")]
     Info {
         path: PathBuf,
@@ -126,6 +140,7 @@ impl ImageStore {
                 format,
                 allocated_bytes,
                 virtual_bytes,
+                used_by: Vec::new(),
             });
         }
         Ok(images)
@@ -176,6 +191,90 @@ impl ImageStore {
             .args(["create", "-q", "-f", "qcow2"])
             .arg(&path)
             .arg(size);
+        self.run(command).await.map(|_| ())
+    }
+
+    /// Streams an upload into the group, refusing to replace an existing image. The data lands in
+    /// a hidden file first and is renamed into place once complete, so a broken upload never
+    /// looks like an image.
+    pub async fn upload(
+        &self,
+        image: &ImageRef,
+        body: impl futures_util::Stream<Item = Result<bytes::Bytes, axum::Error>>,
+    ) -> Result<(), ImageError> {
+        use futures_util::StreamExt;
+        use tokio::io::AsyncWriteExt;
+
+        let path = self.path(image)?;
+        format_of(&image.name).ok_or_else(|| ImageError::UnknownFormat {
+            name: image.name.clone(),
+        })?;
+        let exists = || ImageError::AlreadyExists {
+            group: image.group.clone(),
+            name: image.name.clone(),
+        };
+        if path.exists() {
+            return Err(exists());
+        }
+        let dir = path.parent().unwrap_or(Path::new("."));
+        let io_error = |path: &Path| {
+            let path = path.to_owned();
+            move |source| ImageError::Io { path, source }
+        };
+        std::fs::create_dir_all(dir).map_err(io_error(dir))?;
+        let partial = dir.join(format!(".{}.upload", image.name));
+        let mut file = tokio::fs::File::create(&partial)
+            .await
+            .map_err(io_error(&partial))?;
+
+        let mut body = std::pin::pin!(body);
+        let written = async {
+            while let Some(chunk) = body.next().await {
+                file.write_all(&chunk.map_err(ImageError::Upload)?)
+                    .await
+                    .map_err(io_error(&partial))?;
+            }
+            file.sync_all().await.map_err(io_error(&partial))
+        }
+        .await;
+        let renamed = written.and_then(|()| {
+            if path.exists() {
+                return Err(exists());
+            }
+            std::fs::rename(&partial, &path).map_err(io_error(&path))
+        });
+        if renamed.is_err() {
+            // Best effort: the hidden partial file is skipped by listings either way.
+            let _ = std::fs::remove_file(&partial);
+        }
+        renamed
+    }
+
+    pub fn delete(&self, image: &ImageRef) -> Result<(), ImageError> {
+        let (path, _) = self.resolve(image)?;
+        std::fs::remove_file(&path).map_err(|source| ImageError::Io { path, source })
+    }
+
+    pub async fn resize(&self, image: &ImageRef, size_gib: u32) -> Result<(), ImageError> {
+        let (path, format) = self.resolve(image)?;
+        let format_name = match format {
+            ImageFormat::Qcow2 => "qcow2",
+            ImageFormat::Raw => "raw",
+            ImageFormat::Iso => return Err(ImageError::ResizeIso),
+        };
+        let (_, current) = self.sizes(&path, format).await?;
+        let requested = u64::from(size_gib) << 30;
+        if requested < current {
+            return Err(ImageError::WouldShrink {
+                name: image.name.clone(),
+                current,
+            });
+        }
+        let mut command = Command::new(&self.qemu_img);
+        command
+            .args(["resize", "-q", "-f", format_name])
+            .arg(&path)
+            .arg(format!("{size_gib}G"));
         self.run(command).await.map(|_| ())
     }
 

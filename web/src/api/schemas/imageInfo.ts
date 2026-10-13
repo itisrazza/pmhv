@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { ImageFormat } from './imageFormat';
+import type { ImageUser } from './imageUser';
 
 export interface ImageInfo {
   /**
@@ -16,6 +17,8 @@ export interface ImageInfo {
   format: ImageFormat;
   group: string;
   name: string;
+  /** Machines with this image attached. */
+  used_by: ImageUser[];
   /**
      * Size the guest sees.
      * @minimum 0

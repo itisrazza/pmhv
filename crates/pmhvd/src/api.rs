@@ -1,7 +1,8 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{OriginalUri, Path, State, WebSocketUpgrade};
+use axum::body::Body;
+use axum::extract::{DefaultBodyLimit, OriginalUri, Path, Request, State, WebSocketUpgrade};
 use std::time::Duration;
 
 use axum::http::{HeaderMap, StatusCode, header};
@@ -14,13 +15,16 @@ use futures_util::Stream;
 use futures_util::StreamExt;
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    ApiError, AuthStatus, CreateMachineRequest, Event, HostInfo, ImageGroup, LoginRequest, Machine,
-    MachineId, MachineSpec, PowerRequest, SetPasswordRequest, TemporaryPassword, ThumbnailKind,
+    ApiError, AuthStatus, CreateImageRequest, CreateMachineRequest, Event, HostInfo, ImageGroup,
+    ImageRef, LoginRequest, Machine, MachineId, MachineSpec, PowerRequest, ResizeImageRequest,
+    SetPasswordRequest, TemporaryPassword, ThumbnailKind,
 };
 use tokio::net::UnixStream;
 use tokio::sync::watch;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
+use tower::ServiceExt;
+use tower_http::services::ServeFile;
 use utoipa::OpenApi;
 
 use crate::access;
@@ -44,7 +48,11 @@ use crate::machines::{MachineError, Machines};
         update_machine,
         delete_machine,
         power,
-        list_images
+        list_images,
+        create_image,
+        upload_image,
+        delete_image,
+        resize_image
     ),
     components(schemas(ApiError, Event))
 )]
@@ -76,7 +84,16 @@ pub fn router(state: AppState) -> Router {
         .route("/machines/{id}/console/serial", get(serial_console))
         .route("/machines/{id}/console/vnc", get(vnc_console))
         .route("/machines/{id}/thumbnail", get(thumbnail))
-        .route("/images", get(list_images))
+        .route("/images", get(list_images).post(create_image))
+        .route(
+            "/images/{group}/{name}",
+            get(download_image)
+                .put(upload_image)
+                .delete(delete_image)
+                // Images are routinely gigabytes.
+                .layer(DefaultBodyLimit::disable()),
+        )
+        .route("/images/{group}/{name}/resize", post(resize_image))
         .route("/events", get(events));
     if state.local {
         v1 = v1.route("/auth/reset", post(reset_auth));
@@ -169,10 +186,14 @@ fn image_failure(error: &ImageError, message: String) -> ApiFailure {
         ImageError::UnknownGroup(_) | ImageError::NotFound { .. } => {
             (StatusCode::NOT_FOUND, "not_found")
         }
-        ImageError::AlreadyExists { .. } => (StatusCode::CONFLICT, "conflict"),
-        ImageError::InvalidName(_) | ImageError::UnknownFormat { .. } => {
-            (StatusCode::UNPROCESSABLE_ENTITY, "invalid_image")
+        ImageError::AlreadyExists { .. } | ImageError::InUse { .. } => {
+            (StatusCode::CONFLICT, "conflict")
         }
+        ImageError::InvalidName(_)
+        | ImageError::UnknownFormat { .. }
+        | ImageError::WouldShrink { .. }
+        | ImageError::ResizeIso => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_image"),
+        ImageError::Upload(_) => (StatusCode::BAD_REQUEST, "upload_failed"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
     ApiFailure {
@@ -370,7 +391,112 @@ async fn power(
 async fn list_images(
     State(AppState { machines, .. }): State<AppState>,
 ) -> ApiResult<Json<Vec<ImageGroup>>> {
-    Ok(Json(machines.images().list().await?))
+    Ok(Json(machines.list_images().await?))
+}
+
+#[utoipa::path(post, path = "/api/v1/images", operation_id = "createImage", tag = "images",
+    request_body = CreateImageRequest,
+    responses(
+        (status = 201, description = "Created", body = ImageRef),
+        (status = 409, description = "An image with that name exists", body = ApiError),
+    ))]
+async fn create_image(
+    State(AppState { machines, .. }): State<AppState>,
+    Json(request): Json<CreateImageRequest>,
+) -> ApiResult<(StatusCode, Json<ImageRef>)> {
+    let image = ImageRef {
+        group: request.group,
+        name: request.name,
+    };
+    machines
+        .images()
+        .create_blank(&image, request.size_gib)
+        .await?;
+    Ok((StatusCode::CREATED, Json(image)))
+}
+
+/// Uploads an image file as the request body. Existing images aren't replaced.
+#[utoipa::path(put, path = "/api/v1/images/{group}/{name}", operation_id = "uploadImage", tag = "images",
+    params(("group" = String, Path), ("name" = String, Path)),
+    request_body(content = Vec<u8>, content_type = "application/octet-stream"),
+    responses(
+        (status = 201, description = "Uploaded", body = ImageRef),
+        (status = 409, description = "An image with that name exists", body = ApiError),
+    ))]
+async fn upload_image(
+    State(AppState { machines, .. }): State<AppState>,
+    Path((group, name)): Path<(String, String)>,
+    body: Body,
+) -> ApiResult<(StatusCode, Json<ImageRef>)> {
+    let image = ImageRef { group, name };
+    machines
+        .images()
+        .upload(&image, body.into_data_stream())
+        .await?;
+    tracing::info!(group = image.group, name = image.name, "image uploaded");
+    Ok((StatusCode::CREATED, Json(image)))
+}
+
+/// Downloads an image. Supports `Range` requests, so interrupted downloads can resume.
+async fn download_image(
+    State(AppState { machines, .. }): State<AppState>,
+    Path((group, name)): Path<(String, String)>,
+    request: Request,
+) -> ApiResult<Response> {
+    let image = ImageRef { group, name };
+    let (path, _) = machines.images().resolve(&image)?;
+    let response = ServeFile::new(&path)
+        .oneshot(request)
+        .await
+        .map_err(|error| {
+            ApiFailure::new(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal",
+                error.to_string(),
+            )
+        })?;
+    let disposition = format!("attachment; filename=\"{}\"", image.name.replace('"', "'"));
+    let mut response = response.map(Body::new);
+    if let Ok(value) = header::HeaderValue::from_str(&disposition) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, value);
+    }
+    Ok(response)
+}
+
+/// Deletes an image that no machine has attached.
+#[utoipa::path(delete, path = "/api/v1/images/{group}/{name}", operation_id = "deleteImage", tag = "images",
+    params(("group" = String, Path), ("name" = String, Path)),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 409, description = "A machine uses it", body = ApiError),
+    ))]
+async fn delete_image(
+    State(AppState { machines, .. }): State<AppState>,
+    Path((group, name)): Path<(String, String)>,
+) -> ApiResult<StatusCode> {
+    machines.delete_image(&ImageRef { group, name })?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(post, path = "/api/v1/images/{group}/{name}/resize", operation_id = "resizeImage", tag = "images",
+    params(("group" = String, Path), ("name" = String, Path)),
+    request_body = ResizeImageRequest,
+    responses(
+        (status = 204, description = "Resized"),
+        (status = 409, description = "A running machine uses it", body = ApiError),
+        (status = 422, description = "Would shrink, or it's an ISO", body = ApiError),
+    ))]
+async fn resize_image(
+    State(AppState { machines, .. }): State<AppState>,
+    Path((group, name)): Path<(String, String)>,
+    Json(request): Json<ResizeImageRequest>,
+) -> ApiResult<StatusCode> {
+    machines
+        .resize_image(&ImageRef { group, name }, request.size_gib)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn serial_console(

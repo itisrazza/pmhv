@@ -12,6 +12,7 @@ workspace = true
 [dependencies]
 argon2 = "0.6.0"
 axum = { version = "0.8.9", features = ["ws"] }
+bytes = "1.12.1"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 dirs = "7.0.0"
 futures-util = "0.3.34"
@@ -26,6 +27,8 @@ thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "net", "signal", "fs", "process", "io-util", "time"] }
 tokio-stream = { version = "0.1.19", features = ["sync"] }
 toml = "1.1.8"
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.7.1", features = ["fs"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 utoipa = "6.0.0"

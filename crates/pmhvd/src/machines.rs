@@ -14,8 +14,9 @@ use pmhv_driver::{
 };
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    Arch, ConsoleKind, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageRef, Machine,
-    MachineId, MachineSpec, MachineState, PowerAction, Thumbnail, ThumbnailKind,
+    Arch, ConsoleKind, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageGroup, ImageRef,
+    ImageUser, Machine, MachineId, MachineSpec, MachineState, PowerAction, Thumbnail,
+    ThumbnailKind,
 };
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
@@ -257,6 +258,67 @@ impl Machines {
             }
             Response::Error { message } => Err(MachineError::Shim(message)),
         }
+    }
+
+    /// Machines with `image` attached, with their current state.
+    fn image_users(&self, image: &ImageRef) -> Vec<(MachineId, String, MachineState)> {
+        self.lock()
+            .iter()
+            .filter(|(_, entry)| entry.spec.disks.iter().any(|disk| &disk.image == image))
+            .map(|(id, entry)| (*id, entry.spec.name.clone(), entry.state))
+            .collect()
+    }
+
+    /// Every storage group's images, with which machines use each.
+    pub async fn list_images(&self) -> Result<Vec<ImageGroup>, MachineError> {
+        let mut groups = self.ctx.images.list().await?;
+        for image in groups.iter_mut().flat_map(|group| &mut group.images) {
+            let image_ref = ImageRef {
+                group: image.group.clone(),
+                name: image.name.clone(),
+            };
+            image.used_by = self
+                .image_users(&image_ref)
+                .into_iter()
+                .map(|(id, name, _)| ImageUser { id, name })
+                .collect();
+        }
+        Ok(groups)
+    }
+
+    /// Deletes an image no machine has attached.
+    pub fn delete_image(&self, image: &ImageRef) -> Result<(), MachineError> {
+        let users = self.image_users(image);
+        if !users.is_empty() {
+            return Err(ImageError::InUse {
+                group: image.group.clone(),
+                name: image.name.clone(),
+                machines: users.into_iter().map(|(_, name, _)| name).collect(),
+            }
+            .into());
+        }
+        self.ctx.images.delete(image)?;
+        info!(group = image.group, name = image.name, "image deleted");
+        Ok(())
+    }
+
+    /// Grows an image no running machine is using.
+    pub async fn resize_image(&self, image: &ImageRef, size_gib: u32) -> Result<(), MachineError> {
+        let running: Vec<String> = self
+            .image_users(image)
+            .into_iter()
+            .filter(|(_, _, state)| *state != MachineState::Stopped)
+            .map(|(_, name, _)| name)
+            .collect();
+        if !running.is_empty() {
+            return Err(MachineError::Conflict(format!(
+                "stop {} before resizing {}",
+                running.join(", "),
+                image.name
+            )));
+        }
+        self.ctx.images.resize(image, size_gib).await?;
+        Ok(())
     }
 
     /// The shim's serial console socket, for a machine that's running.
