@@ -46,6 +46,15 @@ Each entry says what happens, why, what pmhv does about it for now, and what a p
 
 ## Third-party
 
+### QEMU's ARM UEFI firmware can't boot from SATA
+
+*Open (upstream limitation).* Found 2026-10-14, EDK2 stable202408 as shipped with QEMU 11.1.2 (Homebrew).
+
+- **What happens:** an aarch64 machine with its install CD on SATA drops into the firmware's setup menu; the UEFI shell's `map` shows nothing. The same ISO on VirtIO-SCSI or USB boots straight into GRUB.
+- **Why:** EDK2's ArmVirtQemu platform doesn't include an AHCI driver, so the `ich9-ahci` controller pmhv attaches is invisible to the firmware. Linux would see the disks once booted, but nothing gets that far.
+- **Workaround in pmhv:** QEMU specs refuse SATA disks on aarch64 with an explanation, and the disk editor disables SATA for ARM machines.
+- **Upstream fix:** include `AtaAtapiPassThruDxe`/`AhciDxe`-style drivers in ArmVirtQemu builds, or (more realistically) keep steering ARM guests to VirtIO, which is what pmhv now does.
+
 ### @types/novnc__novnc declares a module path noVNC no longer has
 
 *Open.* Found 2026-10-14, @types/novnc__novnc 1.6.0 with @novnc/novnc 1.7.0.

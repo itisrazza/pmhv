@@ -1,6 +1,7 @@
 import { Button, Checkbox, Label } from "@swopstar/react-ui";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import type {
+  Arch,
   DiskBus,
   DiskMedia,
   DiskSpec,
@@ -9,9 +10,17 @@ import type {
 import { busLabels, mediaLabels } from "../../lib/labels";
 import { ChoiceSelect, type Choice } from "../form/ChoiceSelect";
 
-const busChoices: Choice<DiskBus>[] = (Object.keys(busLabels) as DiskBus[]).map(
-  (bus) => ({ value: bus, label: busLabels[bus] }),
-);
+/** QEMU's ARM UEFI firmware has no SATA driver, so it can't boot from SATA disks or CD-ROMs. */
+function busChoices(arch: Arch): Choice<DiskBus>[] {
+  return (Object.keys(busLabels) as DiskBus[]).map((bus) => ({
+    value: bus,
+    label:
+      bus === "sata" && arch === "aarch64"
+        ? `${busLabels[bus]} (not bootable on ARM)`
+        : busLabels[bus],
+    disabled: bus === "sata" && arch === "aarch64",
+  }));
+}
 
 const mediaChoices: Choice<DiskMedia>[] = (
   Object.keys(mediaLabels) as DiskMedia[]
@@ -21,6 +30,7 @@ const key = (disk: Pick<DiskSpec, "image">) =>
   `${disk.image.group}/${disk.image.name}`;
 
 interface DiskListEditorProps {
+  arch: Arch;
   disks: DiskSpec[];
   images: ImageInfo[];
   disabled: boolean;
@@ -29,6 +39,7 @@ interface DiskListEditorProps {
 
 /** Disks in boot order: the first one the firmware finds bootable wins. */
 export function DiskListEditor({
+  arch,
   disks,
   images,
   disabled,
@@ -132,7 +143,7 @@ export function DiskListEditor({
               <ChoiceSelect
                 id={`disk-${index}-bus`}
                 value={disk.bus}
-                choices={busChoices}
+                choices={busChoices(arch)}
                 onChange={(bus) => replace(index, { ...disk, bus })}
               />
             </div>
