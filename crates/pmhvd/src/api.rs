@@ -24,7 +24,7 @@ pub fn router() -> Router {
     path = "/api/v1/host",
     operation_id = "getHost",
     tag = "host",
-    responses((status = 200, body = HostInfo))
+    responses((status = 200, description = "Host facts", body = HostInfo))
 )]
 async fn host_info() -> Json<HostInfo> {
     Json(HostInfo {

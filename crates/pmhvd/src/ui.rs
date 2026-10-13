@@ -4,7 +4,7 @@ use axum::response::{IntoResponse, Response};
 
 /// The built web UI. Read from disk in debug builds and compiled in for release builds.
 #[derive(rust_embed::Embed)]
-#[folder = "$CARGO_MANIFEST_DIR/../../web/dist"]
+#[folder = "../../web/dist"]
 #[allow_missing = true]
 struct Assets;
 

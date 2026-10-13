@@ -1,0 +1,84 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "pmhv",
+    "description": "Poor Man's HyperVisor daemon API",
+    "contact": {
+      "name": "Rareș Nistor",
+      "email": "raresh@nistor.email"
+    },
+    "license": {
+      "name": "MIT OR Apache-2.0",
+      "identifier": "MIT OR Apache-2.0"
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/host": {
+      "get": {
+        "tags": [
+          "host"
+        ],
+        "summary": "Facts about the host pmhvd runs on.",
+        "operationId": "getHost",
+        "responses": {
+          "200": {
+            "description": "Host facts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HostInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiError": {
+        "type": "object",
+        "description": "Body of every non-2xx API response.",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Stable, machine-readable error code, e.g. `not_found`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable description of what went wrong."
+          }
+        }
+      },
+      "HostInfo": {
+        "type": "object",
+        "description": "Facts about the machine pmhvd is running on.",
+        "required": [
+          "version",
+          "os",
+          "arch"
+        ],
+        "properties": {
+          "arch": {
+            "type": "string",
+            "description": "Host CPU architecture, as Rust names it (`aarch64`, `x86_64`)."
+          },
+          "os": {
+            "type": "string",
+            "description": "Host operating system, as Rust names it (`macos`, `linux`, `windows`)."
+          },
+          "version": {
+            "type": "string",
+            "description": "pmhvd version."
+          }
+        }
+      }
+    }
+  }
+}
