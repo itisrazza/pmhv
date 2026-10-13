@@ -192,7 +192,14 @@ impl Machines {
         let machine = {
             let mut entries = self.lock();
             let entry = entries.get_mut(&id).ok_or(MachineError::NotFound(id))?;
-            require_stopped(entry, "edited")?;
+            // Notes don't affect the running machine, so they can change at any time.
+            let only_notes = MachineSpec {
+                notes: entry.spec.notes.clone(),
+                ..spec.clone()
+            } == entry.spec;
+            if !only_notes {
+                require_stopped(entry, "edited")?;
+            }
             self.ctx.store.save(id, &spec)?;
             entry.spec = spec;
             view(id, entry)

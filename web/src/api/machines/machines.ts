@@ -333,7 +333,7 @@ export const getUpdateMachineUrl = (id: string,) => {
 }
 
 /**
- * @summary Replaces a stopped machine's spec.
+ * @summary Replaces a machine's spec. Only notes can change while it's running.
  */
 export const updateMachine = async (id: string,
     machineSpec: MachineSpec, options?: Parameters<typeof apiClient>[1]): Promise<Machine> => {
@@ -400,7 +400,7 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type UpdateMachineMutationVariables = {id: string;data: MachineSpec}
 
     /**
- * @summary Replaces a stopped machine's spec.
+ * @summary Replaces a machine's spec. Only notes can change while it's running.
  */
 export const useUpdateMachine = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMachine>>, TError,UpdateMachineMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}

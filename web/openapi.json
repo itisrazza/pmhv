@@ -481,7 +481,7 @@
         "tags": [
           "machines"
         ],
-        "summary": "Replaces a stopped machine's spec.",
+        "summary": "Replaces a machine's spec. Only notes can change while it's running.",
         "operationId": "updateMachine",
         "parameters": [
           {

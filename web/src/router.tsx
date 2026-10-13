@@ -11,6 +11,7 @@ import { AppLayout } from "./layouts/AppLayout";
 import { AuthGate } from "./components/AuthGate";
 import { DiskImagesPage } from "./pages/DiskImagesPage";
 import { MachinePage } from "./pages/MachinePage";
+import { MachineSettingsPage } from "./pages/MachineSettingsPage";
 import { MachinesPage } from "./pages/MachinesPage";
 import { NetworksPage } from "./pages/NetworksPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -70,6 +71,15 @@ const machineRoute = createRoute({
   },
 });
 
+const machineSettingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/machines/$id/settings",
+  component: function MachineSettingsRoute() {
+    const { id } = machineSettingsRoute.useParams();
+    return <MachineSettingsPage id={id} />;
+  },
+});
+
 const diskImagesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/images",
@@ -107,6 +117,7 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     machinesRoute,
     machineRoute,
+    machineSettingsRoute,
     diskImagesRoute,
     networksRoute,
     settingsRoute,

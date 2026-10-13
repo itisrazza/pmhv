@@ -17,6 +17,7 @@ interface ChoiceSelectProps<T extends string> {
   value: T;
   choices: readonly Choice<T>[];
   onChange: (value: T) => void;
+  disabled?: boolean;
 }
 
 export function ChoiceSelect<T extends string>({
@@ -24,9 +25,14 @@ export function ChoiceSelect<T extends string>({
   value,
   choices,
   onChange,
+  disabled,
 }: ChoiceSelectProps<T>) {
   return (
-    <Select value={value} onValueChange={(next) => onChange(next as T)}>
+    <Select
+      value={value}
+      disabled={disabled}
+      onValueChange={(next) => onChange(next as T)}
+    >
       <SelectTrigger id={id} className="w-full">
         <SelectValue />
       </SelectTrigger>

@@ -338,7 +338,7 @@ async fn get_machine(
     Ok(Json(machines.get(id)?))
 }
 
-/// Replaces a stopped machine's spec.
+/// Replaces a machine's spec. Only notes can change while it's running.
 #[utoipa::path(put, path = "/api/v1/machines/{id}", operation_id = "updateMachine", tag = "machines",
     params(("id" = String, Path, description = "Machine ID")),
     request_body = MachineSpec,

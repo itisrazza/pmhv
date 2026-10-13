@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -17,7 +17,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@swopstar/react-ui";
-import { Menu, Pause, Play, Power, RotateCcw, Trash2, Zap } from "lucide-react";
+import {
+  Menu,
+  Pause,
+  Play,
+  Power,
+  RotateCcw,
+  Settings,
+  Trash2,
+  Zap,
+} from "lucide-react";
 import { useDeleteMachine, usePowerMachine } from "../api/machines/machines";
 import type { Machine, PowerAction } from "../api/schemas";
 
@@ -83,6 +92,11 @@ export function PowerControls({ machine }: { machine: Machine }) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+      <Button size="icon" title="Settings" asChild>
+        <Link to="/machines/$id/settings" params={{ id: machine.id }}>
+          <Settings />
+        </Link>
+      </Button>
       <DeleteDialog
         machine={machine}
         open={confirmDelete}
