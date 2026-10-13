@@ -1,6 +1,6 @@
 # pmhv design
 
-> Status: draft for review. Nothing here is implemented yet. Items marked **[decide]** need a call before work starts; items marked **[verify]** are assumptions to check against current platform docs.
+> Status: draft for review. Nothing here is implemented yet. Items marked **[verify]** are assumptions to check against current platform docs.
 
 ## Summary
 
@@ -31,15 +31,15 @@ From the four screens (Machines, Disk images, Networks, machine detail):
 | Mockup element | Design implication |
 | --- | --- |
 | Machine cards with live/last-frame thumbnails | Machines with a graphical console produce screenshots: QMP `screendump` on QEMU, a frame from the VNC stream on Virtualization.framework (see [Consoles](#consoles)). Text-console machines show a rendered terminal snapshot. Cache the last frame on stop. |
-| Hypervisor icon + "native" chip icon per card | Model carries `backend` and `arch`; "native" is derived (guest arch == host arch, hardware-accelerated). Windows CE Dev has no chip → emulated (TCG). |
+| Hypervisor icon + platform icon per card | Model carries `backend` and `arch`. The platform icon is either "native" or "emulated", derived from guest arch vs host arch (native means hardware-accelerated, emulated means QEMU TCG). |
 | Running / Stopped badges | Live state pushed to the UI (WebSocket/SSE), not polled. |
 | Favourites in the sidebar | Per-user UI preference, stored server-side so it follows the user across browsers. |
 | Disk images: "Default image group", "ISO images" | Images live in **storage groups** (directories). Show allocated vs virtual size (`13.5 GiB / 128.0 GiB`). Upload, download, delete, and a menu for more (resize, convert, clone). |
 | Networks: Built-in NAT, Built-in host-only, user-defined subnets | pmhv owns a network model with per-network subnets. This is the hardest cross-platform piece (see [Networking](#networking)). |
-| Detail page: power, pause, menu, settings; console preview with "Open console" | Console is embeddable and also openable full-size. |
+| Detail page: power, pause, menu, settings; console preview with "Open console" | The preview is a live-updating thumbnail, not an interactive console. "Open console" always opens the console in a new tab (see [Consoles](#consoles)). |
 | Hardware list: Hypervisor, Architecture, Machine (`virt`), CPU, Memory, Disk / VirtIO 0, Disk / SATA | Hardware model is bus-aware. Some fields are backend-specific (machine type is a QEMU concept). |
 | Notes | Free-form Markdown per VM. |
-| Disconnect | Log out. There is a single user, identified by a password or passkey (see [Security](#security)). |
+| Disconnect | Log out. There is a single user, signing in with a password and/or passkey (see [Security](#security)). |
 
 Small inconsistency: "Windows CE Dev" says Windows 11 but shows a Windows 7 thumbnail — presumably a placeholder. There's no create-machine screen yet; [Creating a machine](#creating-a-machine) describes a basic one to start from.
 
@@ -126,15 +126,14 @@ $RUNTIME/                      # $XDG_RUNTIME_DIR/pmhv, $TMPDIR/pmhv
 - Display: VNC on a unix socket, proxied by the daemon to noVNC (never exposed directly). Screenshots via QMP `screendump`.
 - Serial: a unix socket chardev, proxied to xterm.js.
 - Firmware: EDK2/OVMF from the QEMU install; per-VM NVRAM copy.
-- TPM for Windows 11 guests needs `swtpm` as an extra child process. **[decide]** whether to support this in v1.
-- pmhv locates QEMU on `PATH` or via config; it doesn't bundle it. QEMU is GPL, but running it as a separate process keeps pmhv's own licence unconstrained.
+- TPM via `swtpm`, run by the shim as a second child process with its state in the machine directory. Supported early, since Windows 11 guests need it.
+- QEMU and `swtpm` come from Homebrew on macOS (distro packages on Linux) for now; pmhv finds them on `PATH` or via config. Shipping known-good builds starts once pmhv is packaged. QEMU is GPL, but running it as a separate process keeps pmhv's own licence unconstrained.
 
 ### Virtualization.framework (macOS)
 
 - Bound from Rust with the `objc2` family of crates (there are generated `objc2-virtualization` bindings). **[verify]** binding coverage for the APIs we need.
 - The shim binary must be code-signed with `com.apple.security.virtualization`. Ad-hoc signing works for local development; a `just` recipe handles it. Bridged networking needs `com.apple.vm.networking`, which Apple only grants on request — plan around not having it.
-- Guests: Linux (ARM64, EFI boot), macOS (Apple silicon only, from an IPSW, limited to two concurrent macOS VMs by the licence/kernel). Windows ARM isn't a realistic VZ guest (no TPM); route it to QEMU.
-- Rosetta for Linux guests is a nice extra, exposed as a VZ-only capability.
+- Guests: mainly macOS (Apple silicon only, installed from an IPSW, limited to two concurrent macOS VMs by the licence/kernel). Linux guests run on QEMU by default; VZ supports them (ARM64, EFI boot), but it's opt-in, e.g. for Rosetta. Windows ARM isn't a realistic VZ guest (no TPM), so it runs on QEMU.
 
 ### Linux
 
@@ -151,7 +150,9 @@ Every machine has one console type, set in its spec:
 - **Graphical** — VNC. The browser uses noVNC.
 - **Text** — serial. The browser uses xterm.js.
 
-Which one a machine uses depends on its setup (a headless Linux runner is text, a desktop OS is graphical). The UI and API treat both uniformly: the detail page embeds whichever the machine has, and "Open console" opens it full-size. pmhvd always proxies the stream over an authenticated WebSocket; consoles are never exposed on a network port directly.
+Which one a machine uses depends on its setup (a headless Linux runner is text, a desktop OS is graphical). The UI and API treat both uniformly. pmhvd always proxies the stream over an authenticated WebSocket; consoles are never exposed on a network port directly.
+
+The console is never embedded. The detail page shows a live thumbnail, and "Open console" always opens the console in its own browser tab (`/machines/{id}/console`), a full-window page with nothing else on it but a slim toolbar.
 
 | | Graphical (VNC) | Text (serial) | Thumbnail |
 | --- | --- | --- | --- |
@@ -163,9 +164,24 @@ Virtualization.framework has no public API to read a VM's framebuffer (graphics 
 - The graphical console is only available once the guest has booted and started its VNC server, so early boot and installers aren't visible. For VZ, installation is driven by an IPSW (macOS) or a serial console (Linux), so this mostly doesn't matter.
 - Credentials for the guest's VNC server are stored in the machine spec.
 
-Not doing: Virtualization.framework's private VNC server class (private API, could vanish in any macOS release) or capturing an offscreen window with ScreenCaptureKit (needs the Screen Recording permission and is fragile).
+**After MVP: spike into Virtualization.framework's unpublished API.** The framework has private VNC server and display-capture functionality that would give a host-side graphical console including early boot, like QEMU's. It's private API, so it could change in any macOS release; the spike should find out what's usable, how stable it's been across recent releases, and keep it behind a capability flag with guest-side VNC as the fallback. Capturing an offscreen window with ScreenCaptureKit is ruled out (needs the Screen Recording permission and is fragile).
 
 Text-console thumbnails are a rendered snapshot of the terminal buffer, which the shim keeps anyway for scrollback.
+
+### Keyboard and mouse in the console tab
+
+The browser and host OS grab key combos before the page sees them (Cmd+Tab, Cmd+Q, Cmd+W, Cmd+Space on macOS; Alt+Tab, the Windows key, Ctrl+Alt+Del on Windows), which is exactly what's painful about web consoles when the guest uses the same combos. The console tab handles this in layers:
+
+- **Keyboard Lock API** (`navigator.keyboard.lock()`): in fullscreen, lets the page capture most system shortcuts. Chromium-based browsers only; **[verify]** which macOS combos it can and can't capture. A fullscreen toggle on the toolbar turns it on, and holding Esc exits.
+- **Pointer Lock API** for relative mouse movement (games, guests without an absolute pointing device). QEMU guests get a USB tablet by default so absolute positioning works without it.
+- **Toolbar combos**: one-click buttons for the combos the browser will never pass through (Ctrl+Alt+Del, Cmd/Win key, Alt+Tab, Ctrl+Alt+F1–F12 for Linux VTs, SysRq), plus user-defined combos saved per machine.
+- **Sticky modifiers**: toggle Ctrl/Alt/Shift/Meta on, then press the next key. Covers anything the presets miss.
+- **Virtual keyboard**: a full on-screen keyboard, for when the physical keyboard path is broken or the layout is wrong — the "shit hits the fan" case.
+- **Virtual mouse**: on-screen buttons for left/middle/right click and scroll, and a trackpad-style area for relative movement, for when the pointer is stuck or grabbed.
+- **Type clipboard**: send text as keystrokes, since guests rarely have clipboard integration at boot.
+- **Power controls** on the toolbar: power button (ACPI), reset, and for text consoles, a serial break (for SysRq).
+
+The text console gets the same toolbar minus the mouse parts. Keys are sent as scancodes/keysyms through the VNC protocol, or as bytes on serial, so a key combo is just a list of keys and works the same on both backends.
 
 ## Networking
 
@@ -222,9 +238,9 @@ Rough resource map:
 A placeholder until a designed flow exists: a single dialog from the **+** button on the Machines screen, in the same visual style as the rest.
 
 1. **Name.**
-2. **Backend** — QEMU or Virtualization.framework, only those found on the host. Changing it re-filters the remaining fields using the backend's `Capabilities`.
-3. **Architecture** — native by default; QEMU also offers emulated ones, labelled as slow.
-4. **Guest OS** — Linux, macOS (VZ only), Windows, Other. Only sets sensible defaults (firmware, disk bus, console type, Windows' TPM need); everything stays editable.
+2. **Guest OS** — Linux, macOS, Windows, Other. Only sets sensible defaults (backend, firmware, disk bus, console type, TPM for Windows 11); everything stays editable.
+3. **Backend** — QEMU or Virtualization.framework, only those found on the host. Defaults to VZ for macOS guests and QEMU for everything else. Changing it re-filters the remaining fields using the backend's `Capabilities`.
+4. **Architecture** — native by default; QEMU also offers emulated ones, labelled as slow.
 5. **CPU and memory** — cores and GiB, defaulting to half the host's cores and a per-OS memory size, capped at what the host has.
 6. **Boot disk** — create a new blank disk (size, in the default image group) or pick an existing image.
 7. **Install media** — optional ISO/IMG from the image store, or an IPSW for macOS guests.
@@ -237,8 +253,10 @@ A placeholder until a designed flow exists: a single dialog from the **+** butto
 
 The daemon can boot arbitrary code and read arbitrary files on the host, so every request is authenticated, even on localhost.
 
-- There is a **single user**. They sign in with a password or a passkey (WebAuthn) and get a session cookie; "Disconnect" in the UI ends the session. **[decide]** password only, passkey only, or either. Passkeys need a stable origin (hostname + HTTPS, or `localhost`), which matters if pmhv is reached by IP address over the LAN.
-- First run: the daemon prints a one-time setup link, used to set the password or register the first passkey.
+- There is a **single user**, with a password, one or more passkeys (WebAuthn), or both. Signing in gives a session cookie; "Disconnect" in the UI ends the session. At least one credential must exist at all times, so removing the last one is refused.
+- Passkeys need a stable origin (a hostname over HTTPS, or `localhost`), so they won't work when pmhv is reached by bare IP address over the LAN. The password covers that case.
+- **First launch:** pmhvd generates a temporary password, prints it to its log and writes it to a `0600` file in the data directory (a launchd agent's output goes to a log file, which is easy to miss). Signing in with it only reaches a setup page, where the user must set their own password or register a passkey. The temporary password stops working as soon as either is done.
+- **Recovery:** `pmhv auth reset`, over the local socket, issues a new temporary password and puts the account back into setup mode. Physical/local access is the recovery path.
 - Default listen address is `127.0.0.1` only. Exposing on the LAN requires TLS (user-provided certificate, or a self-signed one generated on first run).
 - The CLI uses a local socket protected by filesystem permissions, and doesn't need to sign in.
 - Console and API WebSockets are authenticated the same way as HTTP, with origin checks.
@@ -285,19 +303,24 @@ Deferred until after the initial buildout (roughly milestone 3), once the shape 
 
 1. **Skeleton.** Workspace, `pmhvd` serving an empty embedded UI, config loading, `pmhv` CLI talking to it, CI on macOS + Linux.
 2. **QEMU on macOS and Linux, headless.** Machine spec, create/start/stop/pause via shim, serial console in the browser, daemon restart without killing VMs.
-3. **Graphical console and thumbnails** for QEMU. The Machines grid, detail page and basic create dialog. Tests start here.
-4. **Auth.** Single-user sign-in, sessions, log out, first-run setup. Needed before pmhv is left running for long.
+3. **Graphical console and thumbnails** for QEMU. Console tab with keyboard/mouse toolbar, virtual keyboard and mouse. TPM via `swtpm`, so Windows 11 guests work. The Machines grid, detail page and basic create dialog. Tests start here.
+4. **Auth.** Single-user sign-in with password and/or passkey, temporary first-launch password, sessions, log out, CLI reset. Needed before pmhv is left running for long.
 5. **Disk images.** Storage groups, upload/download, create blank, convert, resize.
-6. **Virtualization.framework backend.** Linux guests first, then macOS guests from IPSW. Serial console; guest-VNC console.
-7. **Networking and isolation.** Userspace switch, isolated networks, DHCP, port forwards, egress policy and logging.
-8. **Windows.** QEMU + WHPX, named pipes, service install.
+6. **Virtualization.framework backend.** macOS guests from IPSW, guest-VNC and serial consoles. Linux guests on VZ as an opt-in.
+
+Milestones 1–6 are the **MVP**. After that, roughly in order:
+
+7. **VZ private API spike** for a host-side graphical console (see [Consoles](#consoles)).
+8. **Networking and isolation.** Userspace switch, isolated networks, DHCP, port forwards, egress policy and logging.
+9. **Packaging.** Signed and notarised macOS builds, known-good QEMU and `swtpm` builds shipped with pmhv, service install.
+10. **Windows.** QEMU + WHPX, named pipes, service install.
 
 Snapshots, cloning, cloud-init/unattended install, and import from UTM/VirtualBox are candidates after that.
 
+## Licence
+
+pmhv is dual-licensed under MIT or Apache-2.0, at the user's option — the usual choice for Rust projects. Licensing metadata follows the [REUSE](https://reuse.software/) layout (`REUSE.toml`, `LICENSES/`), as in `@swopstar/react-ui`.
+
 ## Open questions
 
-- **Auth**: password, passkey, or either (see [Security](#security)).
-- **Windows 11 guests**: TPM via `swtpm` early, or with the Windows milestone?
-- **Bundling QEMU**: rely on Homebrew/distro packages, or ship a known-good build?
-- **Licence** for pmhv itself.
 - **Create-machine flow**: to be designed; [Creating a machine](#creating-a-machine) is the placeholder.
