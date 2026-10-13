@@ -1264,6 +1264,13 @@
           "notes": {
             "type": "string"
           },
+          "port_forwards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PortForward"
+            },
+            "description": "Host ports forwarded into the guest, through the built-in NAT. QEMU only."
+          },
           "tpm": {
             "type": "boolean"
           }
@@ -1304,6 +1311,30 @@
           }
         }
       },
+      "PortForward": {
+        "type": "object",
+        "description": "Connections to `host_port` on the host's loopback address reach `guest_port` in the guest.",
+        "required": [
+          "protocol",
+          "host_port",
+          "guest_port"
+        ],
+        "properties": {
+          "guest_port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "host_port": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "protocol": {
+            "$ref": "#/components/schemas/Protocol"
+          }
+        }
+      },
       "PowerAction": {
         "type": "string",
         "enum": [
@@ -1339,6 +1370,13 @@
             "default": []
           }
         }
+      },
+      "Protocol": {
+        "type": "string",
+        "enum": [
+          "tcp",
+          "udp"
+        ]
       },
       "ResizeImageRequest": {
         "type": "object",

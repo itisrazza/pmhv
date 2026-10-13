@@ -83,6 +83,10 @@ export function HardwareList({ machine }: { machine: Machine }) {
       <Rows
         rows={[
           { label: "Network", value: networkLabels[spec.network] },
+          ...(spec.port_forwards ?? []).map((forward) => ({
+            label: `Forward ${forward.protocol.toUpperCase()} ${forward.host_port}`,
+            value: `127.0.0.1:${forward.host_port} → guest ${forward.guest_port}`,
+          })),
           { label: "Console", value: consoleLabels[spec.console] },
         ]}
       />

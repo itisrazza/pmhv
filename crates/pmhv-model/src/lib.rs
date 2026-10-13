@@ -22,6 +22,6 @@ pub use job::{ConvertImageRequest, Job, JobId, JobState};
 pub use machine::{
     Arch, Backend, ConsoleKind, CreateMachineRequest, DiskBus, DiskMedia, DiskSpec, Firmware,
     GuestOs, ImageRef, Machine, MachineId, MachineSpec, MachineState, NetworkSpec, NewDisk,
-    PowerAction, PowerRequest, Thumbnail, ThumbnailKind,
+    PortForward, PowerAction, PowerRequest, Protocol, Thumbnail, ThumbnailKind,
 };
 pub use preferences::Preferences;

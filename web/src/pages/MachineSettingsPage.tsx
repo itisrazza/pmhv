@@ -24,6 +24,7 @@ import { ChoiceSelect, type Choice } from "../components/form/ChoiceSelect";
 import { Field } from "../components/form/Field";
 import { PageTitle } from "../components/PageHeaderSlot";
 import { DiskListEditor } from "../components/settings/DiskListEditor";
+import { PortForwardsEditor } from "../components/settings/PortForwardsEditor";
 import {
   archLabels,
   consoleLabels,
@@ -205,6 +206,16 @@ function SettingsForm({ machine }: { machine: Machine }) {
               <Label htmlFor="tpm">TPM 2.0 (needs swtpm on the host)</Label>
             </div>
           </Section>
+
+          {spec.backend === "qemu" && spec.network === "nat" && (
+            <Section title="Port forwards">
+              <PortForwardsEditor
+                forwards={spec.port_forwards ?? []}
+                disabled={locked}
+                onChange={(port_forwards) => update({ port_forwards })}
+              />
+            </Section>
+          )}
 
           <Section title="Disks">
             <DiskListEditor

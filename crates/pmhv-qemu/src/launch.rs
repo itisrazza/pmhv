@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use pmhv_model::{Arch, DiskBus, DiskMedia, MachineSpec, NetworkSpec};
+use pmhv_model::{Arch, DiskBus, DiskMedia, MachineSpec, NetworkSpec, PortForward, Protocol};
 use serde::{Deserialize, Serialize};
 
 use crate::host::Accelerator;
@@ -19,6 +19,8 @@ pub struct QemuLaunch {
     pub firmware: LaunchFirmware,
     pub disks: Vec<LaunchDisk>,
     pub network: NetworkSpec,
+    #[serde(default)]
+    pub port_forwards: Vec<PortForward>,
     pub graphical: bool,
     pub tpm: Option<TpmLaunch>,
     pub sockets: Sockets,
@@ -85,6 +87,12 @@ pub enum SpecError {
     NvmeCdrom { index: usize },
     #[error("a SATA controller has 6 ports, but {count} SATA disks are attached")]
     TooManySata { count: usize },
+    #[error("port forwards need the built-in NAT network")]
+    ForwardsNeedNat,
+    #[error("port 0 can't be forwarded")]
+    PortZero,
+    #[error("host port {port} is forwarded twice")]
+    DuplicateHostPort { port: u16 },
 }
 
 /// Checks the parts of a spec QEMU can't run, before anything is resolved on the host.
@@ -115,6 +123,27 @@ pub fn validate(spec: &MachineSpec) -> Result<(), SpecError> {
         .count();
     if sata > SATA_PORTS {
         return Err(SpecError::TooManySata { count: sata });
+    }
+    validate_forwards(spec)
+}
+
+fn validate_forwards(spec: &MachineSpec) -> Result<(), SpecError> {
+    if spec.port_forwards.is_empty() {
+        return Ok(());
+    }
+    if spec.network != NetworkSpec::Nat {
+        return Err(SpecError::ForwardsNeedNat);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for forward in &spec.port_forwards {
+        if forward.host_port == 0 || forward.guest_port == 0 {
+            return Err(SpecError::PortZero);
+        }
+        if !seen.insert((forward.protocol, forward.host_port)) {
+            return Err(SpecError::DuplicateHostPort {
+                port: forward.host_port,
+            });
+        }
     }
     Ok(())
 }
@@ -265,7 +294,23 @@ impl QemuLaunch {
     fn network_args(&self, args: &mut Args) {
         match self.network {
             NetworkSpec::None => args.push(["-nic", "none"]),
-            NetworkSpec::Nat => args.push(["-nic", "user,model=virtio-net-pci"]),
+            NetworkSpec::Nat => {
+                // Forwards listen on loopback only: exposing a guest port to the LAN should be
+                // a deliberate choice, which the later networking work will offer.
+                let options: Vec<String> = std::iter::once("user,model=virtio-net-pci".to_owned())
+                    .chain(self.port_forwards.iter().map(|forward| {
+                        let protocol = match forward.protocol {
+                            Protocol::Tcp => "tcp",
+                            Protocol::Udp => "udp",
+                        };
+                        format!(
+                            "hostfwd={protocol}:127.0.0.1:{}-:{}",
+                            forward.host_port, forward.guest_port
+                        )
+                    }))
+                    .collect();
+                args.push(["-nic", &options.join(",")]);
+            }
         }
     }
 }
@@ -322,6 +367,7 @@ mod tests {
             firmware: LaunchFirmware::Bios,
             disks: Vec::new(),
             network: NetworkSpec::None,
+            port_forwards: Vec::new(),
             graphical: false,
             tpm: None,
             sockets: Sockets {
@@ -488,6 +534,29 @@ mod tests {
                 absent: &[],
             },
             Case {
+                name: "port forwards listen on loopback",
+                change: |launch| {
+                    launch.network = NetworkSpec::Nat;
+                    launch.port_forwards = vec![
+                        PortForward {
+                            protocol: Protocol::Tcp,
+                            host_port: 2222,
+                            guest_port: 22,
+                        },
+                        PortForward {
+                            protocol: Protocol::Udp,
+                            host_port: 5353,
+                            guest_port: 53,
+                        },
+                    ];
+                },
+                present: &[&[
+                    "-nic",
+                    "user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22,hostfwd=udp:127.0.0.1:5353-:53",
+                ]],
+                absent: &[],
+            },
+            Case {
                 name: "commas in paths are doubled",
                 change: |launch| {
                     launch.disks = vec![disk("/img/a,b.qcow2", DiskBus::Virtio, DiskMedia::Disk)];
@@ -534,6 +603,7 @@ mod tests {
             network: NetworkSpec::Nat,
             console: ConsoleKind::Text,
             tpm: false,
+            port_forwards: Vec::new(),
             notes: String::new(),
         }
     }
@@ -553,7 +623,7 @@ mod tests {
     #[test]
     fn validates_specs() {
         type Case = (&'static str, fn(&mut MachineSpec), Result<(), SpecError>);
-        let cases: [Case; 7] = [
+        let cases: [Case; 10] = [
             ("valid", |_| {}, Ok(())),
             (
                 "blank name",
@@ -589,6 +659,47 @@ mod tests {
                 "seven SATA disks",
                 |spec| spec.disks = vec![spec_disk(DiskBus::Sata, DiskMedia::Disk); 7],
                 Err(SpecError::TooManySata { count: 7 }),
+            ),
+            (
+                "forwards without NAT",
+                |spec| {
+                    spec.network = NetworkSpec::None;
+                    spec.port_forwards = vec![PortForward {
+                        protocol: Protocol::Tcp,
+                        host_port: 2222,
+                        guest_port: 22,
+                    }];
+                },
+                Err(SpecError::ForwardsNeedNat),
+            ),
+            (
+                "port zero",
+                |spec| {
+                    spec.port_forwards = vec![PortForward {
+                        protocol: Protocol::Tcp,
+                        host_port: 0,
+                        guest_port: 22,
+                    }];
+                },
+                Err(SpecError::PortZero),
+            ),
+            (
+                "same host port twice",
+                |spec| {
+                    spec.port_forwards = vec![
+                        PortForward {
+                            protocol: Protocol::Tcp,
+                            host_port: 2222,
+                            guest_port: 22,
+                        },
+                        PortForward {
+                            protocol: Protocol::Tcp,
+                            host_port: 2222,
+                            guest_port: 2222,
+                        },
+                    ];
+                },
+                Err(SpecError::DuplicateHostPort { port: 2222 }),
             ),
         ];
         for (name, change, expected) in cases {

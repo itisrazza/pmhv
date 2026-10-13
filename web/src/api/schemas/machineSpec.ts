@@ -12,6 +12,7 @@ import type { DiskSpec } from './diskSpec';
 import type { Firmware } from './firmware';
 import type { GuestOs } from './guestOs';
 import type { NetworkSpec } from './networkSpec';
+import type { PortForward } from './portForward';
 
 /**
  * Everything needed to run a machine. Stored as `machine.toml`.
@@ -30,5 +31,7 @@ export interface MachineSpec {
   name: string;
   network: NetworkSpec;
   notes?: string;
+  /** Host ports forwarded into the guest, through the built-in NAT. QEMU only. */
+  port_forwards?: PortForward[];
   tpm?: boolean;
 }

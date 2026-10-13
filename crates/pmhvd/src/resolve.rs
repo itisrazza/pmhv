@@ -121,7 +121,7 @@ impl Resolver<'_> {
 
         Ok(LaunchFile {
             machine_id: id,
-            launch: Launch::Qemu(QemuLaunch {
+            launch: Launch::Qemu(Box::new(QemuLaunch {
                 name: spec.name.clone(),
                 binary: binary.path,
                 arch: spec.arch,
@@ -131,6 +131,7 @@ impl Resolver<'_> {
                 firmware,
                 disks,
                 network: spec.network,
+                port_forwards: spec.port_forwards.clone(),
                 graphical: spec.console == ConsoleKind::Graphical,
                 tpm,
                 sockets: Sockets {
@@ -139,7 +140,7 @@ impl Resolver<'_> {
                     vnc: dir.vnc_socket(),
                     tpm: dir.tpm_socket(),
                 },
-            }),
+            })),
         })
     }
 
@@ -187,6 +188,10 @@ pub enum VzSpecError {
     Graphical,
     #[error("Apple Virtualization has no TPM")]
     Tpm,
+    #[error(
+        "Apple Virtualization doesn't forward ports; its NAT gives the guest an address the host can reach directly"
+    )]
+    PortForwards,
     #[error("Apple Virtualization only boots UEFI")]
     Bios,
     #[error("Apple Virtualization can't emulate other architectures; use QEMU for {0} guests")]
@@ -218,6 +223,9 @@ impl Resolver<'_> {
         }
         if spec.tpm {
             return Err(VzSpecError::Tpm);
+        }
+        if !spec.port_forwards.is_empty() {
+            return Err(VzSpecError::PortForwards);
         }
         if spec.firmware == Firmware::Bios {
             return Err(VzSpecError::Bios);
@@ -302,6 +310,7 @@ mod tests {
             network: NetworkSpec::Nat,
             console: ConsoleKind::Text,
             tpm: false,
+            port_forwards: Vec::new(),
             notes: String::new(),
         }
     }

@@ -121,8 +121,26 @@ pub struct MachineSpec {
     pub console: ConsoleKind,
     #[serde(default)]
     pub tpm: bool,
+    /// Host ports forwarded into the guest, through the built-in NAT. QEMU only.
+    #[serde(default)]
+    pub port_forwards: Vec<PortForward>,
     #[serde(default)]
     pub notes: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum Protocol {
+    Tcp,
+    Udp,
+}
+
+/// Connections to `host_port` on the host's loopback address reach `guest_port` in the guest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PortForward {
+    pub protocol: Protocol,
+    pub host_port: u16,
+    pub guest_port: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

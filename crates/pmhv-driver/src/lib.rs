@@ -24,6 +24,6 @@ pub struct LaunchFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub enum Launch {
-    Qemu(QemuLaunch),
+    Qemu(Box<QemuLaunch>),
     Vz(VzLaunch),
 }

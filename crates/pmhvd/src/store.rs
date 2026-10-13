@@ -148,6 +148,11 @@ mod tests {
             network: NetworkSpec::Nat,
             console: ConsoleKind::Graphical,
             tpm: true,
+            port_forwards: vec![pmhv_model::PortForward {
+                protocol: pmhv_model::Protocol::Tcp,
+                host_port: 2222,
+                guest_port: 22,
+            }],
             notes: "Runs CI.\nSecond line.".to_owned(),
         };
         let id = MachineId::generate();
