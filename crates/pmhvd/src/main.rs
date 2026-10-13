@@ -3,8 +3,13 @@ compile_error!("pmhvd only supports unix hosts for now; Windows support is plann
 
 mod api;
 mod config;
+mod console;
+mod images;
+mod machines;
 mod paths;
+mod resolve;
 mod server;
+mod store;
 mod ui;
 
 use std::io::IsTerminal;
@@ -17,8 +22,11 @@ use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
 
 use crate::config::{Config, ConfigError};
+use crate::images::ImageStore;
+use crate::machines::Context;
 use crate::paths::{Paths, PathsError};
 use crate::server::ServeError;
+use crate::store::MachineStore;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "pmhv daemon")]
@@ -51,6 +59,12 @@ enum DaemonError {
     Serve(#[from] ServeError),
     #[error("failed to render OpenAPI document")]
     Openapi(#[source] serde_json::Error),
+    #[error(transparent)]
+    Qemu(#[from] pmhv_qemu::host::HostError),
+    #[error(
+        "can't find pmhvd's own location to look for pmhv-shim next to it; set `shim` in config.toml"
+    )]
+    CurrentExe(#[source] std::io::Error),
 }
 
 #[tokio::main]
@@ -84,8 +98,26 @@ async fn run(cli: Cli) -> Result<(), DaemonError> {
                 .init();
             let paths = Paths::resolve(cli.data_dir, cli.runtime_dir)?;
             let config = Config::load(&paths.config_file())?;
-            server::run(&config, &paths).await?;
+            let context = context(&config, &paths)?;
+            server::run(&config, &paths, context).await?;
             Ok(())
         }
     }
+}
+
+fn context(config: &Config, paths: &Paths) -> Result<Context, DaemonError> {
+    let qemu_img = pmhv_qemu::host::find_binary("qemu-img", config.qemu.bin_dir.as_deref())?;
+    let shim = match &config.shim {
+        Some(path) => path.clone(),
+        None => std::env::current_exe()
+            .map_err(DaemonError::CurrentExe)?
+            .with_file_name("pmhv-shim"),
+    };
+    Ok(Context {
+        store: MachineStore::new(&paths.data_dir),
+        images: ImageStore::new(&paths.data_dir, &config.images.groups, qemu_img),
+        qemu: config.qemu.clone(),
+        runtime_dir: paths.runtime_dir.clone(),
+        shim,
+    })
 }

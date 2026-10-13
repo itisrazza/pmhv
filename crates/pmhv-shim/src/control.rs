@@ -43,7 +43,13 @@ async fn handle(machine: &Machine, stream: UnixStream) -> Result<(), pmhv_driver
             loop {
                 let current = status.borrow_and_update().clone();
                 let exited = current.exited;
-                write_message(&mut write, &Response::Status(current)).await?;
+                if write_message(&mut write, &Response::Status(current))
+                    .await
+                    .is_err()
+                {
+                    // The watcher went away (pmhvd restarting, usually); nothing to report.
+                    return Ok(());
+                }
                 if exited || status.changed().await.is_err() {
                     return Ok(());
                 }

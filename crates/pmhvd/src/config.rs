@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -21,6 +22,10 @@ pub enum ConfigError {
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub http: HttpConfig,
+    pub qemu: QemuConfig,
+    pub images: ImagesConfig,
+    /// Path to `pmhv-shim`. Defaults to the one next to `pmhvd`.
+    pub shim: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -35,6 +40,25 @@ impl Default for HttpConfig {
             listen: SocketAddr::from((Ipv4Addr::LOCALHOST, DEFAULT_PORT)),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct QemuConfig {
+    /// Directory holding `qemu-system-*` and `qemu-img`. Defaults to searching `PATH`.
+    pub bin_dir: Option<PathBuf>,
+    /// Firmware descriptor directories. Defaults to QEMU's standard locations.
+    pub firmware_dirs: Option<Vec<PathBuf>>,
+    /// Path to `swtpm`. Defaults to searching `PATH`.
+    pub swtpm: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ImagesConfig {
+    /// Extra storage groups by name. The `default` group is always `<data dir>/images/default`
+    /// unless overridden here.
+    pub groups: BTreeMap<String, PathBuf>,
 }
 
 impl Config {

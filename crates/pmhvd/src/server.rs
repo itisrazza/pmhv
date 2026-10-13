@@ -8,9 +8,11 @@ use tokio::net::{TcpListener, UnixListener, UnixStream};
 use tokio::sync::watch;
 use tracing::info;
 
+use crate::api::{self, AppState};
 use crate::config::Config;
+use crate::machines::{Context, MachineError, Machines};
 use crate::paths::Paths;
-use crate::{api, ui};
+use crate::ui;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ServeError {
@@ -34,14 +36,16 @@ pub enum ServeError {
     Control(#[source] io::Error),
     #[error("failed to install signal handler")]
     Signal(#[source] io::Error),
+    #[error(transparent)]
+    Machines(#[from] MachineError),
 }
 
-pub fn app() -> Router {
-    api::router().fallback(ui::serve)
+pub fn app(state: AppState) -> Router {
+    api::router(state).fallback(ui::serve)
 }
 
 /// Serves the same app over TCP (browser) and the control socket (CLI) until a shutdown signal.
-pub async fn run(config: &Config, paths: &Paths) -> Result<(), ServeError> {
+pub async fn run(config: &Config, paths: &Paths, context: Context) -> Result<(), ServeError> {
     // The control socket goes first so a second instance reports "already running" rather than a port clash.
     let socket_path = paths.control_socket();
     let control = bind_control_socket(&paths.runtime_dir, &socket_path).await?;
@@ -54,16 +58,29 @@ pub async fn run(config: &Config, paths: &Paths) -> Result<(), ServeError> {
         }
     };
 
+    // Loaded only once this is the one pmhvd, since loading reattaches to running shims.
+    let machines = match Machines::load(context).await {
+        Ok(machines) => machines,
+        Err(error) => {
+            remove_socket(&socket_path);
+            return Err(error.into());
+        }
+    };
+
     info!(listen = %addr, control_socket = %socket_path.display(), "pmhvd listening");
 
     let (stop_tx, stop_rx) = watch::channel(false);
+    let state = AppState {
+        machines,
+        shutdown: stop_rx.clone(),
+    };
     let mut http_stop = stop_rx.clone();
     let mut control_stop = stop_rx;
 
-    let http = axum::serve(tcp, app()).with_graceful_shutdown(async move {
+    let http = axum::serve(tcp, app(state.clone())).with_graceful_shutdown(async move {
         let _ = http_stop.wait_for(|stop| *stop).await;
     });
-    let control = axum::serve(control, app()).with_graceful_shutdown(async move {
+    let control = axum::serve(control, app(state)).with_graceful_shutdown(async move {
         let _ = control_stop.wait_for(|stop| *stop).await;
     });
     let signal = async move {
