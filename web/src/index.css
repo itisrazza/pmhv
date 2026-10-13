@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/*
+ * @swopstar/react-ui ships its own compiled Tailwind CSS, and its utilities share a cascade layer
+ * with this app's. Where both emit the same utility, the app's copy comes later and wins, which
+ * breaks the library's responsive variants (an app `.hidden` beat the sidebar's `md:block`, so
+ * the desktop sidebar never showed). Scanning the library's build too makes this stylesheet
+ * contain every utility either side uses, in Tailwind's own order.
+ */
+@source "../node_modules/@swopstar/react-ui/dist";
+
 :root {
   color-scheme: light dark;
   font-synthesis: none;
