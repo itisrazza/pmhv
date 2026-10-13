@@ -16,8 +16,8 @@ use futures_util::StreamExt;
 use pmhv_model::report::error_chain;
 use pmhv_model::{
     ApiError, AuthStatus, CreateImageRequest, CreateMachineRequest, Event, HostInfo, ImageGroup,
-    ImageRef, LoginRequest, Machine, MachineId, MachineSpec, PowerRequest, ResizeImageRequest,
-    SetPasswordRequest, TemporaryPassword, ThumbnailKind,
+    ImageRef, LoginRequest, Machine, MachineId, MachineSpec, PowerRequest, Preferences,
+    ResizeImageRequest, SetPasswordRequest, TemporaryPassword, ThumbnailKind,
 };
 use tokio::net::UnixStream;
 use tokio::sync::watch;
@@ -32,6 +32,7 @@ use crate::auth::{Auth, AuthError, SESSION_LIFETIME, SessionKind};
 use crate::console;
 use crate::images::ImageError;
 use crate::machines::{MachineError, Machines};
+use crate::preferences::PreferencesStore;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -41,6 +42,8 @@ use crate::machines::{MachineError, Machines};
         logout,
         session,
         set_password,
+        get_preferences,
+        set_preferences,
         host_info,
         list_machines,
         create_machine,
@@ -62,6 +65,7 @@ pub struct ApiDoc;
 pub struct AppState {
     pub machines: Arc<Machines>,
     pub auth: Arc<Auth>,
+    pub preferences: Arc<PreferencesStore>,
     /// Requests over the local control socket, which filesystem permissions already restrict.
     pub local: bool,
     /// Flips to true on shutdown, so endless responses (the event stream) can finish.
@@ -75,6 +79,7 @@ pub fn router(state: AppState) -> Router {
         .route("/auth/session", get(session))
         .route("/auth/password", post(set_password))
         .route("/host", get(host_info))
+        .route("/preferences", get(get_preferences).put(set_preferences))
         .route("/machines", get(list_machines).post(create_machine))
         .route(
             "/machines/{id}",
@@ -293,6 +298,31 @@ async fn reset_auth(
     Ok(Json(TemporaryPassword {
         password: auth.reset()?,
     }))
+}
+
+#[utoipa::path(get, path = "/api/v1/preferences", operation_id = "getPreferences", tag = "preferences",
+    responses((status = 200, description = "The web UI's settings", body = Preferences)))]
+async fn get_preferences(
+    State(AppState { preferences, .. }): State<AppState>,
+) -> Json<Preferences> {
+    Json(preferences.get())
+}
+
+#[utoipa::path(put, path = "/api/v1/preferences", operation_id = "setPreferences", tag = "preferences",
+    request_body = Preferences,
+    responses((status = 200, description = "Saved", body = Preferences)))]
+async fn set_preferences(
+    State(AppState { preferences, .. }): State<AppState>,
+    Json(new): Json<Preferences>,
+) -> ApiResult<Json<Preferences>> {
+    preferences.set(new.clone()).map_err(|error| {
+        ApiFailure::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal",
+            error_chain(&error),
+        )
+    })?;
+    Ok(Json(new))
 }
 
 /// Facts about the host pmhvd runs on.

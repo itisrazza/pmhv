@@ -28,6 +28,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useDeleteMachine, usePowerMachine } from "../api/machines/machines";
+import { FavouriteButton } from "./FavouriteButton";
 import type { Machine, PowerAction } from "../api/schemas";
 
 function useActions(machine: Machine) {
@@ -50,6 +51,7 @@ export function PowerControls({ machine }: { machine: Machine }) {
 
   return (
     <div className="flex items-center gap-2">
+      <FavouriteButton machineId={machine.id} />
       <Button
         size="icon"
         variant={stopped ? "primary" : "default"}

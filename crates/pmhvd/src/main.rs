@@ -9,6 +9,7 @@ mod console;
 mod images;
 mod machines;
 mod paths;
+mod preferences;
 mod resolve;
 mod server;
 mod store;
@@ -31,6 +32,7 @@ use crate::config::{Config, ConfigError};
 use crate::images::ImageStore;
 use crate::machines::Context;
 use crate::paths::{Paths, PathsError};
+use crate::preferences::{PreferencesError, PreferencesStore};
 use crate::server::ServeError;
 use crate::store::MachineStore;
 
@@ -69,6 +71,8 @@ enum DaemonError {
     Qemu(#[from] pmhv_qemu::host::HostError),
     #[error(transparent)]
     Auth(#[from] AuthError),
+    #[error(transparent)]
+    Preferences(#[from] PreferencesError),
     #[error(
         "can't find pmhvd's own location to look for pmhv-shim next to it; set `shim` in config.toml"
     )]
@@ -108,7 +112,8 @@ async fn run(cli: Cli) -> Result<(), DaemonError> {
             let config = Config::load(&paths.config_file())?;
             let context = context(&config, &paths)?;
             let auth = Arc::new(Auth::load(&paths.data_dir)?);
-            server::run(&config, &paths, context, auth).await?;
+            let preferences = Arc::new(PreferencesStore::load(&paths.data_dir)?);
+            server::run(&config, &paths, context, auth, preferences).await?;
             Ok(())
         }
     }

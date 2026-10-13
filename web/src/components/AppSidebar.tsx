@@ -1,6 +1,8 @@
 import { Link } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetSessionQueryKey, useLogout } from "../api/auth/auth";
+import { useListMachines } from "../api/machines/machines";
+import { useFavourites } from "../lib/favourites";
 import {
   Sidebar,
   SidebarContent,
@@ -56,6 +58,38 @@ function NavMenu({ items }: { items: readonly NavItem[] }) {
   );
 }
 
+function FavouriteMachines() {
+  const { favourites } = useFavourites();
+  const machines = useListMachines();
+  const byId = new Map(machines.data?.map((machine) => [machine.id, machine]));
+  const pinned = favourites.flatMap((id) => byId.get(id) ?? []);
+  if (pinned.length === 0) {
+    return (
+      <p className="px-2 text-xs text-muted-foreground">
+        Star a machine to pin it here.
+      </p>
+    );
+  }
+  return (
+    <SidebarMenu>
+      {pinned.map((machine) => (
+        <SidebarMenuItem key={machine.id}>
+          <SidebarMenuButton asChild>
+            <Link
+              to="/machines/$id"
+              params={{ id: machine.id }}
+              activeProps={{ "data-active": "true" }}
+            >
+              <Box size={16} />
+              {machine.spec.name}
+            </Link>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      ))}
+    </SidebarMenu>
+  );
+}
+
 function DisconnectButton() {
   const queryClient = useQueryClient();
   const logout = useLogout({
@@ -101,7 +135,7 @@ export function AppSidebar() {
         <SidebarGroup>
           <SidebarGroupLabel>Favourites</SidebarGroupLabel>
           <SidebarGroupContent>
-            <SidebarMenu />
+            <FavouriteMachines />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>

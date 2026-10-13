@@ -15,6 +15,7 @@ use crate::auth::Auth;
 use crate::config::Config;
 use crate::machines::{Context, MachineError, Machines};
 use crate::paths::Paths;
+use crate::preferences::PreferencesStore;
 use crate::ui;
 
 #[derive(Debug, thiserror::Error)]
@@ -53,6 +54,7 @@ pub async fn run(
     paths: &Paths,
     context: Context,
     auth: Arc<Auth>,
+    preferences: Arc<PreferencesStore>,
 ) -> Result<(), ServeError> {
     // The control socket goes first so a second instance reports "already running" rather than a port clash.
     let socket_path = paths.control_socket();
@@ -81,6 +83,7 @@ pub async fn run(
     let state = AppState {
         machines,
         auth,
+        preferences,
         local: false,
         shutdown: stop_rx.clone(),
     };

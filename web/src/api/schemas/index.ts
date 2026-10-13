@@ -33,6 +33,7 @@ export * from './networkSpec';
 export * from './newDisk';
 export * from './powerAction';
 export * from './powerRequest';
+export * from './preferences';
 export * from './resizeImageRequest';
 export * from './setPasswordRequest';
 export * from './thumbnail';

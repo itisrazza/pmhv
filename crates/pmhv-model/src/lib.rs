@@ -7,6 +7,7 @@ mod host;
 mod image;
 pub mod machine;
 pub mod paths;
+mod preferences;
 pub mod report;
 
 pub use auth::{AuthStatus, LoginRequest, SetPasswordRequest, TemporaryPassword};
@@ -21,3 +22,4 @@ pub use machine::{
     GuestOs, ImageRef, Machine, MachineId, MachineSpec, MachineState, NetworkSpec, NewDisk,
     PowerAction, PowerRequest, Thumbnail, ThumbnailKind,
 };
+pub use preferences::Preferences;

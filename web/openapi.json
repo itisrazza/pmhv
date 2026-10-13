@@ -631,6 +631,54 @@
           }
         }
       }
+    },
+    "/api/v1/preferences": {
+      "get": {
+        "tags": [
+          "preferences"
+        ],
+        "operationId": "getPreferences",
+        "responses": {
+          "200": {
+            "description": "The web UI's settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "preferences"
+        ],
+        "operationId": "setPreferences",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Preferences"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Preferences"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1118,6 +1166,20 @@
         "properties": {
           "action": {
             "$ref": "#/components/schemas/PowerAction"
+          }
+        }
+      },
+      "Preferences": {
+        "type": "object",
+        "description": "The web UI's settings, kept by pmhvd so they follow the user between browsers.",
+        "properties": {
+          "favourites": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Machines pinned to the sidebar, in order.",
+            "default": []
           }
         }
       },
