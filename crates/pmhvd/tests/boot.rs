@@ -116,8 +116,9 @@ fn wait_until(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
     }
 }
 
-/// Reads the serial console until `needle` shows up.
-fn wait_for_console(socket: &Path, needle: &str) {
+/// Reads the serial console until any of `needles` shows up. Firmware builds differ in what
+/// they print (some distros ship OVMF without the UEFI shell), so callers pass a few.
+fn wait_for_console(socket: &Path, needles: &[&str]) {
     let mut stream = UnixStream::connect(socket).expect("console socket");
     stream
         .set_read_timeout(Some(Duration::from_millis(500)))
@@ -125,10 +126,13 @@ fn wait_for_console(socket: &Path, needle: &str) {
     let deadline = Instant::now() + Duration::from_mins(1);
     let mut output = Vec::new();
     let mut buffer = [0; 4096];
-    while !String::from_utf8_lossy(&output).contains(needle) {
+    while !needles
+        .iter()
+        .any(|needle| String::from_utf8_lossy(&output).contains(needle))
+    {
         assert!(
             Instant::now() < deadline,
-            "{needle:?} never appeared on the console; got:\n{}",
+            "none of {needles:?} appeared on the console; got:\n{}",
             String::from_utf8_lossy(&output)
         );
         match stream.read(&mut buffer) {
@@ -169,7 +173,7 @@ fn boots_uefi_and_survives_a_daemon_restart() {
     let machine: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
     let id = machine["id"].as_str().expect("id");
     let console = env.runtime.path().join("m").join(id).join("con.sock");
-    wait_for_console(&console, "Shell>");
+    wait_for_console(&console, &["Shell>", "BdsDxe", "UEFI", "Boot"]);
 
     drop(daemon);
     let _daemon = env.daemon();
