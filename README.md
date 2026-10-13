@@ -14,7 +14,7 @@ Proxmox and Hyper-V Server want the whole machine. Desktop apps like UTM want yo
 
 - Manage machines, disk images and ISOs, and networks from the browser
 - Consoles that open in their own tab — graphical (VNC) or text (serial) — with helpers for the key combos the browser normally swallows, plus a virtual keyboard and mouse
-- Live thumbnails of running machines
+- Thumbnails of running machines, refreshed every few minutes
 - VMs keep running when the daemon restarts or upgrades
 - Single-user sign-in with a password and/or passkey
 - Isolated networks with egress control, so VMs can't reach out without you knowing (after the MVP)

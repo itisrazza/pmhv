@@ -30,13 +30,13 @@ From the four screens (Machines, Disk images, Networks, machine detail):
 
 | Mockup element | Design implication |
 | --- | --- |
-| Machine cards with live/last-frame thumbnails | Machines with a graphical console produce screenshots: QMP `screendump` on QEMU, a frame from the VNC stream on Virtualization.framework (see [Consoles](#consoles)). Text-console machines show a rendered terminal snapshot. Cache the last frame on stop. |
+| Machine cards with thumbnails | Machines with a graphical console produce screenshots: QMP `screendump` on QEMU, a frame from the VNC stream on Virtualization.framework (see [Consoles](#consoles)). Text-console machines show a rendered terminal snapshot. Cache the last frame on stop. |
 | Hypervisor icon + platform icon per card | Model carries `backend` and `arch`. The platform icon is either "native" or "emulated", derived from guest arch vs host arch (native means hardware-accelerated, emulated means QEMU TCG). |
 | Running / Stopped badges | Live state pushed to the UI (WebSocket/SSE), not polled. |
 | Favourites in the sidebar | Per-user UI preference, stored server-side so it follows the user across browsers. |
 | Disk images: "Default image group", "ISO images" | Images live in **storage groups** (directories). Show allocated vs virtual size (`13.5 GiB / 128.0 GiB`). Upload, download, delete, and a menu for more (resize, convert, clone). |
 | Networks: Built-in NAT, Built-in host-only, user-defined subnets | pmhv owns a network model with per-network subnets. This is the hardest cross-platform piece (see [Networking](#networking)). |
-| Detail page: power, pause, menu, settings; console preview with "Open console" | The preview is a live-updating thumbnail, not an interactive console. "Open console" always opens the console in a new tab (see [Consoles](#consoles)). |
+| Detail page: power, pause, menu, settings; console preview with "Open console" | The preview is the machine's thumbnail, not an interactive console. "Open console" always opens the console in a new tab (see [Consoles](#consoles)). |
 | Hardware list: Hypervisor, Architecture, Machine (`virt`), CPU, Memory, Disk / VirtIO 0, Disk / SATA | Hardware model is bus-aware. Some fields are backend-specific (machine type is a QEMU concept). |
 | Notes | Free-form Markdown per VM. |
 | Disconnect | Log out. There is a single user, signing in with a password and/or passkey (see [Security](#security)). |
@@ -152,7 +152,7 @@ Every machine has one console type, set in its spec:
 
 Which one a machine uses depends on its setup (a headless Linux runner is text, a desktop OS is graphical). The UI and API treat both uniformly. pmhvd always proxies the stream over an authenticated WebSocket; consoles are never exposed on a network port directly.
 
-The console is never embedded. The detail page shows a live thumbnail, and "Open console" always opens the console in its own browser tab (`/machines/{id}/console`), a full-window page with nothing else on it but a slim toolbar.
+The console is never embedded. The detail page shows the thumbnail, and "Open console" always opens the console in its own browser tab (`/machines/{id}/console`), a full-window page with nothing else on it but a slim toolbar.
 
 | | Graphical (VNC) | Text (serial) | Thumbnail |
 | --- | --- | --- | --- |
@@ -167,6 +167,8 @@ Virtualization.framework has no public API to read a VM's framebuffer (graphics 
 **After MVP: spike into Virtualization.framework's unpublished API.** The framework has private VNC server and display-capture functionality that would give a host-side graphical console including early boot, like QEMU's. It's private API, so it could change in any macOS release; the spike should find out what's usable, how stable it's been across recent releases, and keep it behind a capability flag with guest-side VNC as the fallback. Capturing an offscreen window with ScreenCaptureKit is ruled out (needs the Screen Recording permission and is fragile).
 
 Text-console thumbnails are a rendered snapshot of the terminal buffer, which the shim keeps anyway for scrollback.
+
+Thumbnails are throttled: the shim captures one every 5 minutes by default (configurable in `config.toml`), plus one on start, when the guest stops, and when a console tab closes, so the last frame is the most recent one seen. Each capture is stored as `thumbnail.png` and announced on the event stream. For VZ graphical consoles, the shim opens a short VNC connection to the guest to grab a frame rather than holding one open.
 
 ### Keyboard and mouse in the console tab
 
