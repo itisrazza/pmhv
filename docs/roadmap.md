@@ -36,7 +36,6 @@ Not scheduled yet:
 What's left in the milestones marked in progress, and what's done but untested:
 
 - **Auth:** passkeys (see [Security](design.md#security)). Password sign-in, the temporary first-launch password, setup and `pmhv auth reset` are done.
-
 - **Virtualization.framework:** macOS guests (IPSW install and boot) and the guest-VNC graphical console. Linux and other EFI guests with a text console are done, verified only as far as Apple's EFI firmware with a blank disk.
 - **TPM:** the swtpm integration is written but hasn't been run, because swtpm wasn't installed on the development machine (`brew install swtpm`).
 - **Guests:** booted so far: EDK2's UEFI shell, on text and graphical consoles. No real OS install has been tried yet.
