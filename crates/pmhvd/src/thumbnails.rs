@@ -111,3 +111,49 @@ fn strip_escapes(text: &str) -> String {
     }
     output
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cleans_up_terminal_output() {
+        let cases = [
+            ("plain text", "hello\nworld", "hello\nworld"),
+            ("colour codes", "\u{1b}[1;32mok\u{1b}[0m done", "ok done"),
+            ("cursor movement", "a\u{1b}[2Jb\u{1b}[10;5Hc", "abc"),
+            ("window title", "\u{1b}]0;title\u{7}prompt$ ", "prompt$ "),
+            ("title ended by ST", "\u{1b}]2;t\u{1b}\\x", "x"),
+            ("CRLF line endings", "one\r\ntwo\r\n", "one\ntwo\n"),
+            ("carriage return overwrite", "50%\r100%\ndone", "100%\ndone"),
+            ("other control bytes", "bell\u{7} null\u{0}", "bell null"),
+        ];
+        for (name, input, expected) in cases {
+            assert_eq!(screenful(input), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn keeps_only_the_last_screenful() {
+        let input: String = (0..100)
+            .map(|line| format!("line {line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        let output = screenful(&input);
+        assert_eq!(output.lines().count(), TEXT_LINES - 1);
+        assert!(output.ends_with("line 99\n"), "{output}");
+    }
+
+    #[test]
+    fn picks_the_newest_capture() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        assert!(current(dir.path()).is_none());
+
+        write_text(dir.path(), "first").expect("write text");
+        let (thumbnail, path) = current(dir.path()).expect("text thumbnail");
+        assert_eq!(thumbnail.kind, ThumbnailKind::Text);
+        assert_eq!(path, text_file(dir.path()));
+        assert_eq!(std::fs::read_to_string(path).expect("read"), "first");
+    }
+}

@@ -94,3 +94,37 @@ impl Config {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_file_gives_defaults() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let config = Config::load(&dir.path().join("config.toml")).expect("defaults");
+        assert_eq!(
+            config.http.listen,
+            SocketAddr::from((Ipv4Addr::LOCALHOST, DEFAULT_PORT))
+        );
+        assert_eq!(config.thumbnails.interval_secs, 300);
+        assert!(config.images.groups.is_empty());
+    }
+
+    #[test]
+    fn parses_overrides_and_rejects_typos() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("config.toml");
+        let cases = [
+            ("[http]\nlisten = \"0.0.0.0:9000\"\n", true),
+            ("[images.groups]\nexternal = \"/Volumes/VMs\"\n", true),
+            ("[thumbnails]\ninterval_secs = 60\n", true),
+            ("[http]\nlisten_on = \"0.0.0.0:9000\"\n", false),
+            ("[http]\nlisten = \"not an address\"\n", false),
+        ];
+        for (text, valid) in cases {
+            std::fs::write(&path, text).expect("write config");
+            assert_eq!(Config::load(&path).is_ok(), valid, "{text}");
+        }
+    }
+}

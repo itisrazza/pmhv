@@ -221,3 +221,68 @@ fn validate_name(name: &str) -> Result<(), ImageError> {
         Err(ImageError::InvalidName(name.to_owned()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recognises_formats_by_extension() {
+        let cases = [
+            ("disk.qcow2", Some(ImageFormat::Qcow2)),
+            ("DISK.QCOW2", Some(ImageFormat::Qcow2)),
+            ("raw.img", Some(ImageFormat::Raw)),
+            ("raw.raw", Some(ImageFormat::Raw)),
+            ("debian-13.7.0-arm64-netinst.iso", Some(ImageFormat::Iso)),
+            ("notes.txt", None),
+            ("no-extension", None),
+        ];
+        for (name, expected) in cases {
+            assert_eq!(format_of(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn validates_image_names() {
+        let cases = [
+            ("DAVID (AI Agent) - Disk 0.qcow2", true),
+            ("archlinux-2026.10.01-x86_64.iso", true),
+            ("", false),
+            (".hidden.qcow2", false),
+            ("../escape.qcow2", false),
+            ("dir/disk.qcow2", false),
+            ("back\\slash.qcow2", false),
+            ("nul\0.qcow2", false),
+        ];
+        for (name, valid) in cases {
+            assert_eq!(validate_name(name).is_ok(), valid, "{name:?}");
+        }
+    }
+
+    #[test]
+    fn confines_paths_to_known_groups() {
+        let data = tempfile::tempdir().expect("temp dir");
+        let store = ImageStore::new(data.path(), &BTreeMap::new(), PathBuf::from("qemu-img"));
+        let image = |group: &str, name: &str| ImageRef {
+            group: group.to_owned(),
+            name: name.to_owned(),
+        };
+
+        let path = store
+            .path(&image(DEFAULT_GROUP, "disk.qcow2"))
+            .expect("default group");
+        assert_eq!(path, data.path().join("images/default/disk.qcow2"));
+        assert!(matches!(
+            store.path(&image("elsewhere", "disk.qcow2")),
+            Err(ImageError::UnknownGroup(_))
+        ));
+        assert!(matches!(
+            store.path(&image(DEFAULT_GROUP, "../../etc/passwd")),
+            Err(ImageError::InvalidName(_))
+        ));
+        assert!(matches!(
+            store.resolve(&image(DEFAULT_GROUP, "missing.qcow2")),
+            Err(ImageError::NotFound { .. })
+        ));
+    }
+}

@@ -49,6 +49,11 @@ check:
 test:
     cargo test --workspace
 
+# Boot real firmware under QEMU through pmhvd and the shim (needs QEMU)
+test-integration:
+    cargo build --workspace
+    cargo test -p pmhvd --test boot -- --ignored
+
 # Licence metadata (REUSE), for tracked and staged files only so node_modules is skipped
 licences:
     git ls-files -z --cached --others --exclude-standard | xargs -0 reuse lint-file

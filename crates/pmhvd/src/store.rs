@@ -113,3 +113,49 @@ impl MachineStore {
         std::fs::remove_dir_all(&dir).map_err(|source| StoreError::Delete { path: dir, source })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pmhv_model::{
+        Arch, Backend, ConsoleKind, DiskBus, DiskMedia, DiskSpec, Firmware, GuestOs, ImageRef,
+        NetworkSpec,
+    };
+
+    #[test]
+    fn round_trips_specs() {
+        let data = tempfile::tempdir().expect("temp dir");
+        let store = MachineStore::new(data.path());
+        assert!(store.load_all().expect("empty store").is_empty());
+
+        let spec = MachineSpec {
+            name: "Windows ARM Runner".to_owned(),
+            guest_os: GuestOs::Windows,
+            backend: Backend::Qemu,
+            arch: Arch::Aarch64,
+            firmware: Firmware::Uefi,
+            cpu_cores: 4,
+            memory_mib: 8192,
+            disks: vec![DiskSpec {
+                image: ImageRef {
+                    group: "default".to_owned(),
+                    name: "Windows ARM Runner - Disk 0.qcow2".to_owned(),
+                },
+                bus: DiskBus::Nvme,
+                media: DiskMedia::Disk,
+                read_only: false,
+            }],
+            network: NetworkSpec::Nat,
+            console: ConsoleKind::Graphical,
+            tpm: true,
+            notes: "Runs CI.\nSecond line.".to_owned(),
+        };
+        let id = MachineId::generate();
+        store.save(id, &spec).expect("save");
+        std::fs::create_dir_all(data.path().join("machines/not-a-machine")).expect("stray dir");
+
+        assert_eq!(store.load_all().expect("load"), vec![(id, spec)]);
+        store.delete(id).expect("delete");
+        assert!(store.load_all().expect("load after delete").is_empty());
+    }
+}

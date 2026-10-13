@@ -176,3 +176,92 @@ fn machine_matches(pattern: &str, machine: &str) -> bool {
     let alias = prefix.strip_prefix("pc-").unwrap_or(prefix);
     machine == alias || machine.starts_with(&format!("{prefix}-"))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn matches_machine_patterns() {
+        let cases = [
+            ("virt-*", "virt", true),
+            ("virt-*", "virt-9.2", true),
+            ("pc-q35-*", "q35", true),
+            ("pc-q35-*", "pc-q35-10.0", true),
+            ("pc-q35-*", "pc-i440fx-10.0", false),
+            ("pc-i440fx-*", "q35", false),
+            ("virt", "virt", true),
+            ("virt-*", "virtual", false),
+        ];
+        for (pattern, machine, expected) in cases {
+            assert_eq!(
+                machine_matches(pattern, machine),
+                expected,
+                "{pattern} vs {machine}"
+            );
+        }
+    }
+
+    fn descriptor(arch: &str, machine: &str, features: &[&str], code: &str) -> String {
+        serde_json::json!({
+            "description": "test",
+            "interface-types": ["uefi"],
+            "mapping": {
+                "device": "flash",
+                "executable": { "filename": code, "format": "raw" },
+                "nvram-template": { "filename": format!("{code}.vars"), "format": "raw" },
+            },
+            "targets": [{ "architecture": arch, "machines": [machine] }],
+            "features": features,
+            "tags": [],
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn finds_first_matching_non_secure_firmware() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let files = [
+            (
+                "10-secure.json",
+                descriptor(
+                    "x86_64",
+                    "pc-q35-*",
+                    &["secure-boot", "requires-smm"],
+                    "/fw/secure",
+                ),
+            ),
+            (
+                "20-arm.json",
+                descriptor("aarch64", "virt-*", &[], "/fw/arm"),
+            ),
+            (
+                "30-x86.json",
+                descriptor("x86_64", "pc-q35-*", &["acpi-s3"], "/fw/x86"),
+            ),
+            (
+                "40-x86-later.json",
+                descriptor("x86_64", "pc-q35-*", &[], "/fw/x86-later"),
+            ),
+            ("notes.txt", "not a descriptor".to_owned()),
+        ];
+        for (name, contents) in files {
+            std::fs::write(dir.path().join(name), contents).expect("write descriptor");
+        }
+        let dirs = [dir.path().to_owned(), PathBuf::from("/nonexistent")];
+
+        let x86 = find_uefi(Arch::X86_64, "q35", &dirs).expect("x86 firmware");
+        assert_eq!(x86.code, PathBuf::from("/fw/x86"));
+        assert_eq!(x86.vars_template, PathBuf::from("/fw/x86.vars"));
+        let arm = find_uefi(Arch::Aarch64, "virt", &dirs).expect("ARM firmware");
+        assert_eq!(arm.code, PathBuf::from("/fw/arm"));
+    }
+
+    #[test]
+    fn reports_missing_firmware() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let error = find_uefi(Arch::Aarch64, "virt", &[dir.path().to_owned()])
+            .expect_err("nothing to find");
+        assert!(matches!(error, FirmwareError::NotFound { .. }), "{error:?}");
+    }
+}

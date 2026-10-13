@@ -305,3 +305,296 @@ fn escape_commas(path: &Path) -> OsString {
         .collect();
     OsString::from_vec(escaped)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pmhv_model::{ConsoleKind, DiskSpec, Firmware, GuestOs, ImageRef};
+
+    fn launch() -> QemuLaunch {
+        QemuLaunch {
+            name: "test".to_owned(),
+            binary: PathBuf::from("/bin/qemu-system-aarch64"),
+            arch: Arch::Aarch64,
+            accelerator: Accelerator::Hvf,
+            cpu_cores: 2,
+            memory_mib: 1024,
+            firmware: LaunchFirmware::Bios,
+            disks: Vec::new(),
+            network: NetworkSpec::None,
+            graphical: false,
+            tpm: None,
+            sockets: Sockets {
+                qmp: PathBuf::from("/run/qmp.sock"),
+                serial: PathBuf::from("/run/ser.sock"),
+                vnc: PathBuf::from("/run/vnc.sock"),
+                tpm: PathBuf::from("/run/tpm.sock"),
+            },
+        }
+    }
+
+    fn disk(path: &str, bus: DiskBus, media: DiskMedia) -> LaunchDisk {
+        LaunchDisk {
+            path: PathBuf::from(path),
+            format: DiskFormat::Qcow2,
+            bus,
+            media,
+            read_only: false,
+        }
+    }
+
+    fn args(launch: &QemuLaunch) -> Vec<String> {
+        launch
+            .args()
+            .into_iter()
+            .map(|arg| arg.into_string().expect("test args are UTF-8"))
+            .collect()
+    }
+
+    /// True when `needle` appears in `haystack` as consecutive arguments.
+    fn contains_run(haystack: &[String], needle: &[&str]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window.iter().zip(needle).all(|(a, b)| a == b))
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines, reason = "one table of cases")]
+    fn builds_expected_arguments() {
+        struct Case {
+            name: &'static str,
+            change: fn(&mut QemuLaunch),
+            present: &'static [&'static [&'static str]],
+            absent: &'static [&'static str],
+        }
+        let cases = [
+            Case {
+                name: "starts paused with QMP and serial sockets",
+                change: |_| {},
+                present: &[
+                    &["-S"],
+                    &["-qmp", "unix:/run/qmp.sock,server=on,wait=off"],
+                    &[
+                        "-chardev",
+                        "socket,id=serial0,path=/run/ser.sock,server=on,wait=off",
+                    ],
+                    &["-serial", "chardev:serial0"],
+                    &["-display", "none"],
+                    &["-nic", "none"],
+                ],
+                absent: &["-vnc", "-tpmdev"],
+            },
+            Case {
+                name: "hardware acceleration uses the host CPU",
+                change: |_| {},
+                present: &[&["-accel", "hvf", "-cpu", "host"], &["-machine", "virt"]],
+                absent: &[],
+            },
+            Case {
+                name: "emulation uses TCG's max CPU",
+                change: |launch| {
+                    launch.arch = Arch::X86_64;
+                    launch.accelerator = Accelerator::Tcg;
+                },
+                present: &[&["-accel", "tcg", "-cpu", "max"], &["-machine", "q35"]],
+                absent: &[],
+            },
+            Case {
+                name: "UEFI maps code read-only and vars writable",
+                change: |launch| {
+                    launch.firmware = LaunchFirmware::Uefi {
+                        code: PathBuf::from("/fw/code.fd"),
+                        vars: PathBuf::from("/vm/nvram.fd"),
+                    };
+                },
+                present: &[
+                    &[
+                        "-drive",
+                        "if=pflash,format=raw,unit=0,readonly=on,file=/fw/code.fd",
+                    ],
+                    &["-drive", "if=pflash,format=raw,unit=1,file=/vm/nvram.fd"],
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "graphical ARM gets virtio-gpu, USB input and VNC",
+                change: |launch| launch.graphical = true,
+                present: &[
+                    &["-device", "virtio-gpu-pci"],
+                    &["-device", "usb-tablet,bus=input-xhci.0"],
+                    &["-vnc", "unix:/run/vnc.sock"],
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "graphical x86 gets standard VGA",
+                change: |launch| {
+                    launch.arch = Arch::X86_64;
+                    launch.graphical = true;
+                },
+                present: &[&["-device", "VGA"]],
+                absent: &["virtio-gpu-pci"],
+            },
+            Case {
+                name: "TPM on ARM uses the sysbus device",
+                change: |launch| {
+                    launch.tpm = Some(TpmLaunch {
+                        swtpm: PathBuf::from("/bin/swtpm"),
+                        state_dir: PathBuf::from("/vm/tpm"),
+                    });
+                },
+                present: &[
+                    &["-chardev", "socket,id=tpm-chardev,path=/run/tpm.sock"],
+                    &["-device", "tpm-tis-device,tpmdev=tpm0"],
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "NAT uses user-mode networking",
+                change: |launch| launch.network = NetworkSpec::Nat,
+                present: &[&["-nic", "user,model=virtio-net-pci"]],
+                absent: &[],
+            },
+            Case {
+                name: "disks get controllers, devices and boot order",
+                change: |launch| {
+                    launch.disks = vec![
+                        disk("/img/boot.qcow2", DiskBus::Virtio, DiskMedia::Disk),
+                        disk("/img/setup.iso", DiskBus::Sata, DiskMedia::Cdrom),
+                        disk("/img/data.qcow2", DiskBus::Sata, DiskMedia::Disk),
+                        disk("/img/cd.iso", DiskBus::Virtio, DiskMedia::Cdrom),
+                        disk("/img/fast.qcow2", DiskBus::Nvme, DiskMedia::Disk),
+                        disk("/img/stick.img", DiskBus::Usb, DiskMedia::Disk),
+                    ];
+                },
+                present: &[
+                    &["-device", "virtio-scsi-pci,id=scsi0"],
+                    &["-device", "ich9-ahci,id=ahci0"],
+                    &["-device", "qemu-xhci,id=disk-xhci"],
+                    &["-device", "virtio-blk-pci,drive=disk0,bootindex=0"],
+                    &["-device", "ide-cd,drive=disk1,bus=ahci0.0,bootindex=1"],
+                    &["-device", "ide-hd,drive=disk2,bus=ahci0.1,bootindex=2"],
+                    &["-device", "scsi-cd,drive=disk3,bus=scsi0.0,bootindex=3"],
+                    &["-device", "nvme,drive=disk4,serial=disk4,bootindex=4"],
+                    &[
+                        "-device",
+                        "usb-storage,drive=disk5,bus=disk-xhci.0,bootindex=5",
+                    ],
+                    &[
+                        "-drive",
+                        "file=/img/setup.iso,format=qcow2,if=none,id=disk1,media=cdrom,readonly=on",
+                    ],
+                ],
+                absent: &[],
+            },
+            Case {
+                name: "commas in paths are doubled",
+                change: |launch| {
+                    launch.disks = vec![disk("/img/a,b.qcow2", DiskBus::Virtio, DiskMedia::Disk)];
+                },
+                present: &[&[
+                    "-drive",
+                    "file=/img/a,,b.qcow2,format=qcow2,if=none,id=disk0,media=disk,readonly=off",
+                ]],
+                absent: &[],
+            },
+        ];
+
+        for case in cases {
+            let mut launch = launch();
+            (case.change)(&mut launch);
+            let args = args(&launch);
+            for run in case.present {
+                assert!(
+                    contains_run(&args, run),
+                    "{}: missing {run:?} in {args:?}",
+                    case.name
+                );
+            }
+            for arg in case.absent {
+                assert!(
+                    !args.iter().any(|candidate| candidate.contains(arg)),
+                    "{}: unexpected {arg} in {args:?}",
+                    case.name
+                );
+            }
+        }
+    }
+
+    fn spec() -> MachineSpec {
+        MachineSpec {
+            name: "test".to_owned(),
+            guest_os: GuestOs::Linux,
+            backend: pmhv_model::Backend::Qemu,
+            arch: Arch::Aarch64,
+            firmware: Firmware::Uefi,
+            cpu_cores: 2,
+            memory_mib: 1024,
+            disks: Vec::new(),
+            network: NetworkSpec::Nat,
+            console: ConsoleKind::Text,
+            tpm: false,
+            notes: String::new(),
+        }
+    }
+
+    fn spec_disk(bus: DiskBus, media: DiskMedia) -> DiskSpec {
+        DiskSpec {
+            image: ImageRef {
+                group: "default".to_owned(),
+                name: "disk.qcow2".to_owned(),
+            },
+            bus,
+            media,
+            read_only: false,
+        }
+    }
+
+    #[test]
+    fn validates_specs() {
+        type Case = (&'static str, fn(&mut MachineSpec), Result<(), SpecError>);
+        let cases: [Case; 7] = [
+            ("valid", |_| {}, Ok(())),
+            (
+                "blank name",
+                |spec| spec.name = "  ".to_owned(),
+                Err(SpecError::EmptyName),
+            ),
+            (
+                "no cores",
+                |spec| spec.cpu_cores = 0,
+                Err(SpecError::NoCores),
+            ),
+            (
+                "tiny memory",
+                |spec| spec.memory_mib = 32,
+                Err(SpecError::TooLittleMemory),
+            ),
+            (
+                "BIOS on ARM",
+                |spec| spec.firmware = Firmware::Bios,
+                Err(SpecError::BiosNeedsX86),
+            ),
+            (
+                "NVMe CD-ROM",
+                |spec| {
+                    spec.disks = vec![
+                        spec_disk(DiskBus::Virtio, DiskMedia::Disk),
+                        spec_disk(DiskBus::Nvme, DiskMedia::Cdrom),
+                    ];
+                },
+                Err(SpecError::NvmeCdrom { index: 1 }),
+            ),
+            (
+                "seven SATA disks",
+                |spec| spec.disks = vec![spec_disk(DiskBus::Sata, DiskMedia::Disk); 7],
+                Err(SpecError::TooManySata { count: 7 }),
+            ),
+        ];
+        for (name, change, expected) in cases {
+            let mut spec = spec();
+            change(&mut spec);
+            assert_eq!(validate(&spec), expected, "{name}");
+        }
+    }
+}

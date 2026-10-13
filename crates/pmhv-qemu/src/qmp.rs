@@ -201,3 +201,102 @@ fn reply(pending: &Pending, id: u64, value: Reply) {
 fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::UnixListener;
+
+    /// A fake QEMU: greets, accepts capabilities, then answers each command from `replies` by
+    /// name, sending `events` after the first command.
+    async fn serve(
+        listener: UnixListener,
+        replies: Vec<(&'static str, Value)>,
+        events: Vec<Value>,
+    ) {
+        let (stream, _) = listener.accept().await.expect("accept");
+        let (read, mut write) = stream.into_split();
+        let mut lines = BufReader::new(read).lines();
+        let mut send = async |value: Value| {
+            let mut line = serde_json::to_vec(&value).expect("encode");
+            line.push(b'\n');
+            write.write_all(&line).await.expect("write");
+        };
+        send(json!({ "QMP": { "version": {}, "capabilities": [] } })).await;
+        let mut events = Some(events);
+        while let Ok(Some(line)) = lines.next_line().await {
+            let request: Value = serde_json::from_str(&line).expect("request JSON");
+            let command = request["execute"].as_str().expect("execute").to_owned();
+            let id = request["id"].clone();
+            let reply = replies
+                .iter()
+                .find(|(name, _)| *name == command)
+                .map_or_else(|| json!({ "return": {} }), |(_, reply)| reply.clone());
+            let mut reply = reply;
+            reply["id"] = id;
+            send(reply).await;
+            if command != "qmp_capabilities" {
+                for event in events.take().into_iter().flatten() {
+                    send(event).await;
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn executes_commands_and_relays_events() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("qmp.sock");
+        let listener = UnixListener::bind(&path).expect("bind");
+        let server = tokio::spawn(serve(
+            listener,
+            vec![
+                ("query-status", json!({ "return": { "status": "running" } })),
+                (
+                    "cont",
+                    json!({ "error": { "class": "GenericError", "desc": "nope" } }),
+                ),
+            ],
+            vec![json!({ "event": "STOP", "data": {}, "timestamp": {} })],
+        ));
+
+        let (qmp, mut events) = Qmp::connect(&path).await.expect("connect");
+        let status = qmp
+            .execute("query-status", None)
+            .await
+            .expect("query-status");
+        assert_eq!(status, json!({ "status": "running" }));
+
+        let error = qmp.execute("cont", None).await.expect_err("cont fails");
+        assert!(
+            matches!(&error, QmpError::Command { class, description, .. } if class == "GenericError" && description == "nope"),
+            "{error:?}"
+        );
+
+        let event = events.recv().await.expect("event");
+        assert_eq!(event.name, "STOP");
+
+        drop(qmp);
+        server.await.expect("server");
+        assert!(
+            events.recv().await.is_none(),
+            "event stream ends when the connection closes"
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_a_non_qmp_greeting() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("qmp.sock");
+        let listener = UnixListener::bind(&path).expect("bind");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            stream.write_all(b"{\"hello\":1}\n").await.expect("write");
+        });
+        let error = Qmp::connect(&path).await.err().expect("bad greeting");
+        assert!(
+            matches!(error, QmpError::Decode(_) | QmpError::Unexpected(_)),
+            "{error:?}"
+        );
+    }
+}
