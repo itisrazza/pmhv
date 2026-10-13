@@ -68,6 +68,13 @@ test-integration:
     just sign
     cargo test -p pmhvd --test boot -- --ignored
 
+# Drive the web UI in headless Chromium against an isolated pmhvd (needs QEMU and Chromium;
+# PMHV_CHROMIUM picks the browser)
+test-ui: build-web
+    cargo build --workspace
+    just sign
+    npm --prefix web run test:ui
+
 # Licence metadata (REUSE), for tracked and staged files only so node_modules is skipped
 licences:
     git ls-files -z --cached --others --exclude-standard | xargs -0 reuse lint-file

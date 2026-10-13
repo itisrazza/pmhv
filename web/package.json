@@ -11,7 +11,8 @@
     "fmt": "prettier . --write",
     "fmt:check": "prettier . --check",
     "generate": "orval --config orval.config.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:ui": "node tests/ui/run.ts"
   },
   "dependencies": {
     "@novnc/novnc": "^1.7.0",
@@ -35,6 +36,7 @@
     "orval": "^8.41.0",
     "oxlint": "^1.81.0",
     "prettier": "^3.9.10",
+    "puppeteer-core": "^25.13.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
