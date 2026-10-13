@@ -192,17 +192,32 @@ impl Auth {
     }
 
     /// Sets the password from a signed-in session, which becomes the only session.
-    pub async fn set_password(&self, token: &str, password: &str) -> Result<(), AuthError> {
-        if self.session(token).is_none() {
-            return Err(AuthError::NoSession);
-        }
+    /// A full session has to prove it knows the current password, so a stolen session cookie
+    /// can't be used to lock the user out; a setup session (temporary password) doesn't.
+    pub async fn set_password(
+        &self,
+        token: &str,
+        current: Option<&str>,
+        password: &str,
+    ) -> Result<(), AuthError> {
+        let kind = self.session(token).ok_or(AuthError::NoSession)?;
         if password.chars().count() < MIN_PASSWORD_CHARS {
             return Err(AuthError::PasswordTooShort);
         }
+        let existing = lock(&self.credentials).password.clone();
+        let current = current.map(str::to_owned);
         let password = password.to_owned();
-        let hash = tokio::task::spawn_blocking(move || hash(&password))
-            .await
-            .map_err(|error| AuthError::Hash(error.to_string()))??;
+        let hash = tokio::task::spawn_blocking(move || {
+            if kind == SessionKind::Full {
+                let proven = matches!((&existing, &current), (Some(hash), Some(current)) if verify(current, hash));
+                if !proven {
+                    return Err(AuthError::InvalidCredentials);
+                }
+            }
+            hash(&password)
+        })
+        .await
+        .map_err(|error| AuthError::Hash(error.to_string()))??;
         {
             let mut credentials = lock(&self.credentials);
             credentials.password = Some(hash);
@@ -403,10 +418,10 @@ mod tests {
         let (other, _) = auth.login(&temporary).await.expect("second session");
 
         assert!(matches!(
-            auth.set_password(&setup, "short").await,
+            auth.set_password(&setup, None, "short").await,
             Err(AuthError::PasswordTooShort)
         ));
-        auth.set_password(&setup, "correct horse battery")
+        auth.set_password(&setup, None, "correct horse battery")
             .await
             .expect("set password");
         assert_eq!(
@@ -418,6 +433,20 @@ mod tests {
         assert!(!data.path().join("initial-password.txt").exists());
         assert!(matches!(
             auth.login(&temporary).await,
+            Err(AuthError::InvalidCredentials)
+        ));
+
+        assert!(
+            matches!(
+                auth.set_password(&setup, None, "a different password")
+                    .await,
+                Err(AuthError::InvalidCredentials)
+            ),
+            "changing a password needs the current one"
+        );
+        assert!(matches!(
+            auth.set_password(&setup, Some("wrong"), "a different password")
+                .await,
             Err(AuthError::InvalidCredentials)
         ));
 
@@ -458,7 +487,8 @@ mod tests {
         auth.logout(&token);
         assert_eq!(auth.session(&token), None);
         assert!(matches!(
-            auth.set_password(&token, "long enough password").await,
+            auth.set_password(&token, None, "long enough password")
+                .await,
             Err(AuthError::NoSession)
         ));
     }

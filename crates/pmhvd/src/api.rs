@@ -298,7 +298,8 @@ async fn session(
     })
 }
 
-/// Sets the password. Other sessions are signed out.
+/// Sets the password. Changing an existing one needs the current one. Other sessions are
+/// signed out.
 #[utoipa::path(post, path = "/api/v1/auth/password", operation_id = "setPassword", tag = "auth",
     request_body = SetPasswordRequest,
     responses(
@@ -311,7 +312,12 @@ async fn set_password(
     JsonBody(request): JsonBody<SetPasswordRequest>,
 ) -> ApiResult<Json<AuthStatus>> {
     let token = access::session_token(&headers).ok_or(AuthError::NoSession)?;
-    auth.set_password(&token, &request.password).await?;
+    auth.set_password(
+        &token,
+        request.current_password.as_deref(),
+        &request.password,
+    )
+    .await?;
     Ok(Json(AuthStatus {
         authenticated: true,
         setup_required: false,

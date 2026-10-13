@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from "@swopstar/react-ui";
 import { useGetHost } from "../api/host/host";
 import type { HostInfo } from "../api/schemas";
+import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { PageTitle } from "../components/PageHeaderSlot";
 
 function HostDetails({ host }: { host: HostInfo }) {
@@ -38,6 +39,8 @@ export function SettingsPage() {
         </Alert>
       )}
       {host.isSuccess && <HostDetails host={host.data} />}
+      <h2 className="mt-6 text-base font-semibold">Password</h2>
+      <ChangePasswordForm />
     </div>
   );
 }

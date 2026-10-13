@@ -73,7 +73,7 @@
         "tags": [
           "auth"
         ],
-        "summary": "Sets the password. Other sessions are signed out.",
+        "summary": "Sets the password. Changing an existing one needs the current one. Other sessions are\nsigned out.",
         "operationId": "setPassword",
         "requestBody": {
           "content": {
@@ -1360,6 +1360,13 @@
           "password"
         ],
         "properties": {
+          "current_password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required when changing an existing password; not needed during first-launch setup."
+          },
           "password": {
             "type": "string"
           }

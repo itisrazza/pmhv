@@ -7,5 +7,10 @@
  */
 
 export interface SetPasswordRequest {
+  /**
+     * Required when changing an existing password; not needed during first-launch setup.
+     * @nullable
+     */
+  current_password?: string | null;
   password: string;
 }

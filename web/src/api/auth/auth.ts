@@ -217,7 +217,8 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 }
 
 /**
- * @summary Sets the password. Other sessions are signed out.
+ * @summary Sets the password. Changing an existing one needs the current one. Other sessions are
+signed out.
  */
 export const setPassword = async (setPasswordRequest: SetPasswordRequest, options?: Parameters<typeof apiClient>[1]): Promise<AuthStatus> => {
 
@@ -283,7 +284,8 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
     export type SetPasswordMutationVariables = {data: SetPasswordRequest}
 
     /**
- * @summary Sets the password. Other sessions are signed out.
+ * @summary Sets the password. Changing an existing one needs the current one. Other sessions are
+signed out.
  */
 export const useSetPassword = <TError = ErrorType<ApiError>,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setPassword>>, TError,SetPasswordMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}

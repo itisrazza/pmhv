@@ -9,6 +9,9 @@ pub struct LoginRequest {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SetPasswordRequest {
     pub password: String,
+    /// Required when changing an existing password; not needed during first-launch setup.
+    #[serde(default)]
+    pub current_password: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
