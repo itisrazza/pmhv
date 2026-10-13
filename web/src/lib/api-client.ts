@@ -37,8 +37,10 @@ export const apiClient = async <T>(
   if (!response.ok) {
     throw await toRequestError(response);
   }
-  const data: unknown = await response.json();
-  return { data, status: response.status, headers: response.headers } as T;
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
 };
 
 // orval picks this up from the mutator file and uses it as every hook's error type.

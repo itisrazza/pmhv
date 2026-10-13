@@ -1,11 +1,16 @@
+import { lazy, Suspense } from "react";
 import {
+  Outlet,
   createRootRoute,
   createRoute,
   createRouter,
   redirect,
 } from "@tanstack/react-router";
+import { Toaster } from "@swopstar/react-ui";
 import { AppLayout } from "./layouts/AppLayout";
+import { useMachineEvents } from "./lib/events";
 import { DiskImagesPage } from "./pages/DiskImagesPage";
+import { MachinePage } from "./pages/MachinePage";
 import { MachinesPage } from "./pages/MachinesPage";
 import { NetworksPage } from "./pages/NetworksPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -14,15 +19,35 @@ declare module "@tanstack/react-router" {
   interface Register {
     router: typeof router;
   }
-  interface StaticDataRouteOption {
-    title?: string;
-  }
 }
 
-const rootRoute = createRootRoute({ component: AppLayout });
+function Root() {
+  useMachineEvents();
+  return (
+    <>
+      <Outlet />
+      <Toaster />
+    </>
+  );
+}
+
+const rootRoute = createRootRoute({ component: Root });
+
+// noVNC and xterm.js are only needed in the console tab.
+const ConsolePage = lazy(() =>
+  import("./pages/ConsolePage").then((module) => ({
+    default: module.ConsolePage,
+  })),
+);
+
+const appRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "app",
+  component: AppLayout,
+});
 
 const indexRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/",
   beforeLoad: () => {
     throw redirect({ to: "/machines" });
@@ -30,39 +55,62 @@ const indexRoute = createRoute({
 });
 
 const machinesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/machines",
-  staticData: { title: "Machines" },
   component: MachinesPage,
 });
 
+const machineRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/machines/$id",
+  component: function MachineRoute() {
+    const { id } = machineRoute.useParams();
+    return <MachinePage id={id} />;
+  },
+});
+
 const diskImagesRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/images",
-  staticData: { title: "Disk images" },
   component: DiskImagesPage,
 });
 
 const networksRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/networks",
-  staticData: { title: "Networks" },
   component: NetworksPage,
 });
 
 const settingsRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => appRoute,
   path: "/settings",
-  staticData: { title: "Settings" },
   component: SettingsPage,
 });
 
+// The console opens in its own tab, so it gets the whole window rather than the app layout.
+const consoleRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/machines/$id/console",
+  component: function ConsoleRoute() {
+    const { id } = consoleRoute.useParams();
+    return (
+      <Suspense>
+        <ConsolePage id={id} />
+      </Suspense>
+    );
+  },
+});
+
 const routeTree = rootRoute.addChildren([
-  indexRoute,
-  machinesRoute,
-  diskImagesRoute,
-  networksRoute,
-  settingsRoute,
+  appRoute.addChildren([
+    indexRoute,
+    machinesRoute,
+    machineRoute,
+    diskImagesRoute,
+    networksRoute,
+    settingsRoute,
+  ]),
+  consoleRoute,
 ]);
 
 export const router = createRouter({ routeTree });

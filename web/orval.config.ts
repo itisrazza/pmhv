@@ -11,6 +11,8 @@ export default defineConfig({
       clean: true,
       override: {
         mutator: { path: "src/lib/api-client.ts", name: "apiClient" },
+        // apiClient throws on errors, so hooks only ever see the success body.
+        fetch: { includeHttpResponseReturnType: false },
       },
     },
   },

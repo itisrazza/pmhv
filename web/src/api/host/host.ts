@@ -47,18 +47,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export type getHostResponse200 = {
-  data: HostInfo
-  status: 200
-}
-
-export type getHostResponseSuccess = (getHostResponse200) & {
-  headers: Headers;
-};
-;
-
-export type getHostResponse = (getHostResponseSuccess)
-
 export const getGetHostUrl = () => {
 
 
@@ -70,9 +58,9 @@ export const getGetHostUrl = () => {
 /**
  * @summary Facts about the host pmhvd runs on.
  */
-export const getHost = async ( options?: Parameters<typeof apiClient>[1]): Promise<getHostResponse> => {
+export const getHost = async ( options?: Parameters<typeof apiClient>[1]): Promise<HostInfo> => {
 
-  return apiClient<getHostResponse>(getGetHostUrl(),
+  return apiClient<HostInfo>(getGetHostUrl(),
   {
     ...options,
     method: 'GET'

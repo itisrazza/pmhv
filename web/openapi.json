@@ -34,6 +34,285 @@
           }
         }
       }
+    },
+    "/api/v1/images": {
+      "get": {
+        "tags": [
+          "images"
+        ],
+        "operationId": "listImages",
+        "responses": {
+          "200": {
+            "description": "Storage groups and their images",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ImageGroup"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/machines": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "listMachines",
+        "responses": {
+          "200": {
+            "description": "All machines, by name",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Machine"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "createMachine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMachineRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/machines/{id}": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "getMachine",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The machine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such machine",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Replaces a stopped machine's spec.",
+        "operationId": "updateMachine",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineSpec"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The machine isn't stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid spec",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Deletes a stopped machine. Its disk images stay in the image store.",
+        "operationId": "deleteMachine",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted"
+          },
+          "409": {
+            "description": "The machine isn't stopped",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/machines/{id}/power": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "operationId": "powerMachine",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Machine ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PowerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Action accepted; state changes follow on the event stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Not possible in the machine's current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The machine couldn't start or refused the action",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -56,6 +335,144 @@
           }
         }
       },
+      "Arch": {
+        "type": "string",
+        "enum": [
+          "aarch64",
+          "x86_64"
+        ]
+      },
+      "Backend": {
+        "type": "string",
+        "enum": [
+          "qemu",
+          "vz"
+        ]
+      },
+      "ConsoleKind": {
+        "type": "string",
+        "enum": [
+          "text",
+          "graphical"
+        ]
+      },
+      "CreateMachineRequest": {
+        "type": "object",
+        "required": [
+          "spec"
+        ],
+        "properties": {
+          "new_boot_disk": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NewDisk",
+                "description": "Create a blank boot disk in the default image group and attach it first."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "spec": {
+            "$ref": "#/components/schemas/MachineSpec"
+          }
+        }
+      },
+      "DiskBus": {
+        "type": "string",
+        "enum": [
+          "virtio",
+          "nvme",
+          "sata",
+          "usb"
+        ]
+      },
+      "DiskMedia": {
+        "type": "string",
+        "enum": [
+          "disk",
+          "cdrom"
+        ]
+      },
+      "DiskSpec": {
+        "type": "object",
+        "required": [
+          "image",
+          "bus",
+          "media"
+        ],
+        "properties": {
+          "bus": {
+            "$ref": "#/components/schemas/DiskBus"
+          },
+          "image": {
+            "$ref": "#/components/schemas/ImageRef"
+          },
+          "media": {
+            "$ref": "#/components/schemas/DiskMedia"
+          },
+          "read_only": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Event": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "machine",
+              "type"
+            ],
+            "properties": {
+              "machine": {
+                "$ref": "#/components/schemas/Machine"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "machine_updated"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "id",
+              "type"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "machine_removed"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Pushed to clients on the event stream."
+      },
+      "Firmware": {
+        "type": "string",
+        "enum": [
+          "uefi",
+          "bios"
+        ]
+      },
+      "GuestOs": {
+        "type": "string",
+        "enum": [
+          "linux",
+          "macos",
+          "windows",
+          "other"
+        ]
+      },
       "HostInfo": {
         "type": "object",
         "description": "Facts about the machine pmhvd is running on.",
@@ -76,6 +493,229 @@
           "version": {
             "type": "string",
             "description": "pmhvd version."
+          }
+        }
+      },
+      "ImageFormat": {
+        "type": "string",
+        "enum": [
+          "qcow2",
+          "raw",
+          "iso"
+        ]
+      },
+      "ImageGroup": {
+        "type": "object",
+        "required": [
+          "name",
+          "images"
+        ],
+        "properties": {
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageInfo"
+            }
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "ImageInfo": {
+        "type": "object",
+        "required": [
+          "group",
+          "name",
+          "format",
+          "allocated_bytes",
+          "virtual_bytes"
+        ],
+        "properties": {
+          "allocated_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Space used on the host.",
+            "minimum": 0
+          },
+          "format": {
+            "$ref": "#/components/schemas/ImageFormat"
+          },
+          "group": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "virtual_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size the guest sees.",
+            "minimum": 0
+          }
+        }
+      },
+      "ImageRef": {
+        "type": "object",
+        "description": "An image in one of pmhv's storage groups.",
+        "required": [
+          "group",
+          "name"
+        ],
+        "properties": {
+          "group": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "Machine": {
+        "type": "object",
+        "required": [
+          "id",
+          "spec",
+          "state",
+          "emulated"
+        ],
+        "properties": {
+          "emulated": {
+            "type": "boolean",
+            "description": "True when the guest architecture differs from the host's, so it runs under emulation."
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the machine last stopped, if it didn't stop cleanly."
+          },
+          "spec": {
+            "$ref": "#/components/schemas/MachineSpec"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MachineState"
+          }
+        }
+      },
+      "MachineSpec": {
+        "type": "object",
+        "description": "Everything needed to run a machine. Stored as `machine.toml`.",
+        "required": [
+          "name",
+          "guest_os",
+          "backend",
+          "arch",
+          "firmware",
+          "cpu_cores",
+          "memory_mib",
+          "network",
+          "console"
+        ],
+        "properties": {
+          "arch": {
+            "$ref": "#/components/schemas/Arch"
+          },
+          "backend": {
+            "$ref": "#/components/schemas/Backend"
+          },
+          "console": {
+            "$ref": "#/components/schemas/ConsoleKind"
+          },
+          "cpu_cores": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiskSpec"
+            }
+          },
+          "firmware": {
+            "$ref": "#/components/schemas/Firmware"
+          },
+          "guest_os": {
+            "$ref": "#/components/schemas/GuestOs"
+          },
+          "memory_mib": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "network": {
+            "$ref": "#/components/schemas/NetworkSpec"
+          },
+          "notes": {
+            "type": "string"
+          },
+          "tpm": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MachineState": {
+        "type": "string",
+        "enum": [
+          "stopped",
+          "starting",
+          "running",
+          "paused",
+          "stopping"
+        ]
+      },
+      "NetworkSpec": {
+        "type": "string",
+        "enum": [
+          "none",
+          "nat"
+        ]
+      },
+      "NewDisk": {
+        "type": "object",
+        "required": [
+          "size_gib",
+          "bus"
+        ],
+        "properties": {
+          "bus": {
+            "$ref": "#/components/schemas/DiskBus"
+          },
+          "size_gib": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "PowerAction": {
+        "type": "string",
+        "enum": [
+          "start",
+          "stop",
+          "force_stop",
+          "reset",
+          "pause",
+          "resume"
+        ]
+      },
+      "PowerRequest": {
+        "type": "object",
+        "required": [
+          "action"
+        ],
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/PowerAction"
           }
         }
       }

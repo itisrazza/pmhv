@@ -1,6 +1,7 @@
 import { Alert, AlertDescription, AlertTitle } from "@swopstar/react-ui";
 import { useGetHost } from "../api/host/host";
 import type { HostInfo } from "../api/schemas";
+import { PageTitle } from "../components/PageHeaderSlot";
 
 function HostDetails({ host }: { host: HostInfo }) {
   const rows = [
@@ -25,6 +26,7 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-6">
+      <PageTitle title="Settings" />
       <h2 className="text-base font-semibold">About this host</h2>
       {host.isPending && (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -35,7 +37,7 @@ export function SettingsPage() {
           <AlertDescription>{host.error.message}</AlertDescription>
         </Alert>
       )}
-      {host.isSuccess && <HostDetails host={host.data.data} />}
+      {host.isSuccess && <HostDetails host={host.data} />}
     </div>
   );
 }

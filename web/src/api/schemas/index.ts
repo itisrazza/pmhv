@@ -7,4 +7,25 @@
  */
 
 export * from './apiError';
+export * from './arch';
+export * from './backend';
+export * from './consoleKind';
+export * from './createMachineRequest';
+export * from './diskBus';
+export * from './diskMedia';
+export * from './diskSpec';
+export * from './event';
+export * from './firmware';
+export * from './guestOs';
 export * from './hostInfo';
+export * from './imageFormat';
+export * from './imageGroup';
+export * from './imageInfo';
+export * from './imageRef';
+export * from './machine';
+export * from './machineSpec';
+export * from './machineState';
+export * from './networkSpec';
+export * from './newDisk';
+export * from './powerAction';
+export * from './powerRequest';

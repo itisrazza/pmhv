@@ -1,14 +1,20 @@
-import { Outlet, useMatches } from "@tanstack/react-router";
-import { PageHeader, Scaffold } from "@swopstar/react-ui";
+import { useState } from "react";
+import { Outlet } from "@tanstack/react-router";
+import { Scaffold } from "@swopstar/react-ui";
 import { AppSidebar } from "../components/AppSidebar";
+import { PageHeaderSlotContext } from "../components/PageHeaderSlot";
 
 export function AppLayout() {
-  const matches = useMatches();
-  const title = matches[matches.length - 1]?.staticData.title ?? "";
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null);
 
   return (
-    <Scaffold sidebar={<AppSidebar />} header={<PageHeader title={title} />}>
-      <Outlet />
-    </Scaffold>
+    <PageHeaderSlotContext.Provider value={headerSlot}>
+      <Scaffold
+        sidebar={<AppSidebar />}
+        header={<div ref={setHeaderSlot} className="flex flex-1" />}
+      >
+        <Outlet />
+      </Scaffold>
+    </PageHeaderSlotContext.Provider>
   );
 }
