@@ -3,6 +3,9 @@
 //! On first launch (or after `pmhv auth reset`) there's only a temporary password, written to
 //! `initial-password.txt` in the data directory and printed to the log. Signing in with it gives
 //! a setup session that can only set a real password.
+//!
+//! Sessions are saved to `sessions.json` so they survive a restart. Only a hash of each token
+//! is stored, so the file can't be used to sign in.
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -10,13 +13,14 @@ use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use rand::RngExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
 pub const MIN_PASSWORD_CHARS: usize = 10;
@@ -45,7 +49,8 @@ pub enum AuthError {
     Hash(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SessionKind {
     /// Signed in with the temporary password; may only set a password.
     Setup,
@@ -59,16 +64,22 @@ struct Credentials {
     temporary_password: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 struct Session {
     kind: SessionKind,
-    expires: Instant,
+    /// Seconds since the Unix epoch.
+    expires_at: u64,
 }
+
+/// Sessions by SHA-256 of their token, hex-encoded.
+type Sessions = HashMap<String, Session>;
 
 pub struct Auth {
     credentials_file: PathBuf,
     initial_password_file: PathBuf,
+    sessions_file: PathBuf,
     credentials: Mutex<Credentials>,
-    sessions: Mutex<HashMap<String, Session>>,
+    sessions: Mutex<Sessions>,
 }
 
 impl Auth {
@@ -88,11 +99,14 @@ impl Auth {
                 });
             }
         };
+        let sessions_file = data_dir.join("sessions.json");
+        let sessions = read_sessions(&sessions_file)?;
         let auth = Self {
             initial_password_file: data_dir.join("initial-password.txt"),
             credentials_file,
+            sessions_file,
             credentials: Mutex::new(credentials),
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(sessions),
         };
         let needs_password = {
             let credentials = lock(&auth.credentials);
@@ -133,26 +147,48 @@ impl Auth {
             return Err(AuthError::InvalidCredentials);
         };
         let token = random_token();
-        lock(&self.sessions).insert(
-            token.clone(),
-            Session {
-                kind,
-                expires: Instant::now() + SESSION_LIFETIME,
-            },
-        );
+        self.update_sessions(|sessions| {
+            sessions.insert(
+                token_hash(&token),
+                Session {
+                    kind,
+                    expires_at: now_secs() + SESSION_LIFETIME.as_secs(),
+                },
+            );
+        });
         info!(?kind, "signed in");
         Ok((token, kind))
     }
 
     pub fn session(&self, token: &str) -> Option<SessionKind> {
-        let mut sessions = lock(&self.sessions);
-        let now = Instant::now();
-        sessions.retain(|_, session| session.expires > now);
-        sessions.get(token).map(|session| session.kind)
+        let now = now_secs();
+        lock(&self.sessions)
+            .get(&token_hash(token))
+            .filter(|session| session.expires_at > now)
+            .map(|session| session.kind)
     }
 
     pub fn logout(&self, token: &str) {
-        lock(&self.sessions).remove(token);
+        self.update_sessions(|sessions| {
+            sessions.remove(&token_hash(token));
+        });
+    }
+
+    /// Changes the sessions, drops expired ones, and saves them. Failing to save is logged rather
+    /// than returned: the sessions still work until pmhvd restarts.
+    fn update_sessions(&self, change: impl FnOnce(&mut Sessions)) {
+        let mut sessions = lock(&self.sessions);
+        change(&mut sessions);
+        let now = now_secs();
+        sessions.retain(|_, session| session.expires_at > now);
+        let saved = serde_json::to_vec(&*sessions)
+            .map_err(|error| error.to_string())
+            .and_then(|json| {
+                write_private(&self.sessions_file, &json).map_err(|error| error.to_string())
+            });
+        if let Err(error) = saved {
+            warn!(path = %self.sessions_file.display(), error, "failed to save sessions");
+        }
     }
 
     /// Sets the password from a signed-in session, which becomes the only session.
@@ -176,11 +212,13 @@ impl Auth {
         if let Err(error) = remove_if_present(&self.initial_password_file) {
             warn!(path = %self.initial_password_file.display(), %error, "failed to remove the initial password file");
         }
-        let mut sessions = lock(&self.sessions);
-        sessions.retain(|existing, _| existing == token);
-        if let Some(session) = sessions.get_mut(token) {
-            session.kind = SessionKind::Full;
-        }
+        let current = token_hash(token);
+        self.update_sessions(|sessions| {
+            sessions.retain(|existing, _| *existing == current);
+            if let Some(session) = sessions.get_mut(&current) {
+                session.kind = SessionKind::Full;
+            }
+        });
         info!("password set");
         Ok(())
     }
@@ -192,7 +230,7 @@ impl Auth {
             credentials.password = None;
             self.save(&credentials)?;
         }
-        lock(&self.sessions).clear();
+        self.update_sessions(HashMap::clear);
         self.issue_temporary()
     }
 
@@ -240,15 +278,43 @@ fn verify(password: &str, hash: &str) -> bool {
     })
 }
 
-fn random_token() -> String {
-    let bytes: [u8; 32] = rand::rng().random();
+fn read_sessions(path: &Path) -> Result<Sessions, AuthError> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|source| AuthError::Parse {
+            path: path.to_owned(),
+            source,
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Sessions::new()),
+        Err(source) => Err(AuthError::Read {
+            path: path.to_owned(),
+            source,
+        }),
+    }
+}
+
+fn token_hash(token: &str) -> String {
+    hex(&Sha256::digest(token.as_bytes()))
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+fn hex(bytes: &[u8]) -> String {
     bytes
         .iter()
-        .fold(String::with_capacity(64), |mut hex, byte| {
+        .fold(String::with_capacity(bytes.len() * 2), |mut hex, byte| {
             // Writing to a String can't fail.
             let _ = write!(hex, "{byte:02x}");
             hex
         })
+}
+
+fn random_token() -> String {
+    let bytes: [u8; 32] = rand::rng().random();
+    hex(&bytes)
 }
 
 /// Four groups of five, e.g. `k7qmz-2xwrf-…`.
@@ -356,6 +422,15 @@ mod tests {
         ));
 
         let reloaded = Auth::load(data.path()).expect("reload");
+        assert_eq!(
+            reloaded.session(&setup),
+            Some(SessionKind::Full),
+            "sessions survive a restart"
+        );
+        let stored =
+            std::fs::read_to_string(data.path().join("sessions.json")).expect("sessions file");
+        assert!(!stored.contains(&setup), "only token hashes are stored");
+        assert_eq!(mode(&data.path().join("sessions.json")), 0o600);
         let (_, kind) = reloaded
             .login("correct horse battery")
             .await

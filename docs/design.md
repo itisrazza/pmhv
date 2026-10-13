@@ -100,6 +100,7 @@ Declarative, file-based, one directory per thing. Human-readable, diffable, easy
 $DATA/                         # ~/Library/Application Support/pmhv, $XDG_DATA_HOME/pmhv, %LOCALAPPDATA%\pmhv
   config.toml                  # daemon settings, storage groups, listen address
   auth.json                    # password hashes (0600)
+  sessions.json                # browser sessions, by token hash (0600)
   initial-password.txt         # temporary password, until a real one is set (0600)
   machines/<id>/
     machine.toml               # spec: name, backend, arch, cpu, memory, devices, notes
@@ -277,7 +278,7 @@ The daemon can boot arbitrary code and read arbitrary files on the host, so ever
 - Default listen address is `127.0.0.1` only. Exposing on the LAN requires TLS (user-provided certificate, or a self-signed one generated on first run).
 - The CLI uses a local socket protected by filesystem permissions, and doesn't need to sign in.
 - Console and API WebSockets are authenticated the same way as HTTP. Requests that change state, and WebSocket upgrades, must carry an `Origin` matching `Host`.
-- Sessions are an `HttpOnly`, `SameSite=Strict` cookie lasting 7 days. They're kept in memory for now, so restarting pmhvd signs browsers out; persisting them is a small follow-up.
+- Sessions are an `HttpOnly`, `SameSite=Strict` cookie lasting 7 days, saved in `sessions.json` (as SHA-256 hashes of the tokens) so they survive restarts.
 - Implemented so far: the password, the temporary first-launch password, setup sessions and `pmhv auth reset`. Passkeys are still to do: the main Rust WebAuthn crate (`webauthn-rs`) depends on OpenSSL, so choosing a library deserves a deliberate decision.
 - Image paths are confined to configured storage groups; no `..` or absolute paths from the API.
 - Run as the logged-in user. Anything privileged (host-only networking, bridging) goes through a narrowly scoped helper, not a root daemon.

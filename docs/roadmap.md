@@ -35,7 +35,7 @@ Not scheduled yet:
 
 What's left in the milestones marked in progress, and what's done but untested:
 
-- **Auth:** passkeys (see [Security](design.md#security)). Password sign-in, the temporary first-launch password, setup and `pmhv auth reset` are done. Sessions don't survive a pmhvd restart yet.
+- **Auth:** passkeys (see [Security](design.md#security)). Password sign-in, the temporary first-launch password, setup and `pmhv auth reset` are done.
 - **Disk images:** converting between formats, which needs the background jobs from the API design. Upload, download, new blank images, resize and delete are done.
 - **TPM:** the swtpm integration is written but hasn't been run, because swtpm wasn't installed on the development machine (`brew install swtpm`).
 - **Machine settings:** the API can replace a stopped machine's spec, but the UI has no settings page yet.
