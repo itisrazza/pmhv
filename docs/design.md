@@ -99,16 +99,27 @@ Declarative, file-based, one directory per thing. Human-readable, diffable, easy
 ```
 $DATA/                         # ~/Library/Application Support/pmhv, $XDG_DATA_HOME/pmhv, %LOCALAPPDATA%\pmhv
   config.toml                  # daemon settings, storage groups, listen address
+  auth.json                    # password hashes (0600)
+  initial-password.txt         # temporary password, until a real one is set (0600)
   machines/<id>/
     machine.toml               # spec: name, backend, arch, cpu, memory, devices, notes
-    nvram.fd / aux storage     # firmware state, backend-specific
-    thumbnail.png              # last frame
+    nvram.fd                   # UEFI variable store, copied from the firmware's template
+    tpm/                       # swtpm state
+    thumbnail.png | .txt       # last capture
+    shim.log                   # the shim's and QEMU's output
   images/<group>/…             # disk images and ISOs (groups can point elsewhere, e.g. an external drive)
-  networks/<id>.toml
-  ui/preferences.toml          # favourites etc.
+  networks/<id>.toml           # (later)
+  ui/preferences.toml          # favourites etc. (later)
 $RUNTIME/                      # $XDG_RUNTIME_DIR/pmhv, $TMPDIR/pmhv
-  machines/<id>/shim.sock, qmp.sock, vnc.sock, serial.sock, shim.pid
+  pmhvd.sock                   # the CLI's control socket
+  m/<id>/                      # one per running machine; names kept short for socket path limits
+    launch.json                # resolved launch plan, written by pmhvd for the shim
+    ctl.sock, con.sock         # the shim's control and console sockets
+    qmp.sock, ser.sock, vnc.sock, tpm.sock   # QEMU's and swtpm's sockets
+    exit.json                  # the shim's final status, read if pmhvd wasn't watching
 ```
+
+Unix socket paths are limited to 104 bytes on macOS, and `$TMPDIR` there is already about 50, which is why the runtime layout uses `m/` and three-letter socket names.
 
 - IDs are ULIDs; names are display-only and editable.
 - Disks reference images by `group/path`, so moving a VM between groups is a config edit.
@@ -215,17 +226,21 @@ This is the biggest chunk of novel work in the project; it could even be its own
 Rough resource map:
 
 ```
-/api/v1/machines            GET POST
-/api/v1/machines/{id}       GET PATCH DELETE
-/api/v1/machines/{id}/power POST {action: start|stop|reset|pause|resume, force?}
-/api/v1/machines/{id}/thumbnail
-/api/v1/machines/{id}/console/{vnc|serial}   (WebSocket)
-/api/v1/images  /api/v1/images/{group}/{name}   (+ upload, download, convert, resize)
-/api/v1/networks  /api/v1/networks/{id}
-/api/v1/host                 capabilities, backends found, resources
-/api/v1/events               (WebSocket/SSE)
-/api/v1/jobs/{id}
+/api/v1/auth/{login,logout,session,password}   POST/GET; /auth/reset on the local socket only
+/api/v1/machines                    GET POST
+/api/v1/machines/{id}               GET PUT DELETE
+/api/v1/machines/{id}/power         POST {action: start|stop|force_stop|reset|pause|resume}
+/api/v1/machines/{id}/thumbnail     GET (PNG or text)
+/api/v1/machines/{id}/console/{serial|vnc}   WebSocket
+/api/v1/images                      GET POST (new blank image)
+/api/v1/images/{group}/{name}       GET (download, Range) PUT (upload) DELETE
+/api/v1/images/{group}/{name}/resize   POST
+/api/v1/host                        GET
+/api/v1/events                      SSE
+/api/v1/networks…, /api/v1/jobs/{id}   (later)
 ```
+
+The OpenAPI document (`pmhvd openapi`) is the authoritative list.
 
 ## Web UI
 
@@ -261,7 +276,9 @@ The daemon can boot arbitrary code and read arbitrary files on the host, so ever
 - **Recovery:** `pmhv auth reset`, over the local socket, issues a new temporary password and puts the account back into setup mode. Physical/local access is the recovery path.
 - Default listen address is `127.0.0.1` only. Exposing on the LAN requires TLS (user-provided certificate, or a self-signed one generated on first run).
 - The CLI uses a local socket protected by filesystem permissions, and doesn't need to sign in.
-- Console and API WebSockets are authenticated the same way as HTTP, with origin checks.
+- Console and API WebSockets are authenticated the same way as HTTP. Requests that change state, and WebSocket upgrades, must carry an `Origin` matching `Host`.
+- Sessions are an `HttpOnly`, `SameSite=Strict` cookie lasting 7 days. They're kept in memory for now, so restarting pmhvd signs browsers out; persisting them is a small follow-up.
+- Implemented so far: the password, the temporary first-launch password, setup sessions and `pmhv auth reset`. Passkeys are still to do: the main Rust WebAuthn crate (`webauthn-rs`) depends on OpenSSL, so choosing a library deserves a deliberate decision.
 - Image paths are confined to configured storage groups; no `..` or absolute paths from the API.
 - Run as the logged-in user. Anything privileged (host-only networking, bridging) goes through a narrowly scoped helper, not a root daemon.
 

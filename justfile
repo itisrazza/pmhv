@@ -11,8 +11,10 @@ web-deps:
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
+    # pmhvd starts pmhv-shim from next to itself, so build everything first.
+    cargo build --workspace
     trap 'kill 0' EXIT
-    cargo run -p pmhvd &
+    ./target/debug/pmhvd &
     npm --prefix web run dev
 
 # Build the web UI into web/dist
