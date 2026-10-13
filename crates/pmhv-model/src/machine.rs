@@ -145,6 +145,24 @@ pub struct Machine {
     pub emulated: bool,
     /// Why the machine last stopped, if it didn't stop cleanly.
     pub last_error: Option<String>,
+    /// The most recent capture of the machine's screen, if there's been one.
+    pub thumbnail: Option<Thumbnail>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ThumbnailKind {
+    /// A PNG of the framebuffer.
+    Image,
+    /// The tail of the serial console, as plain text.
+    Text,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct Thumbnail {
+    pub kind: ThumbnailKind,
+    /// When it was captured, in milliseconds since the Unix epoch. Changes with every capture.
+    pub captured_at: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

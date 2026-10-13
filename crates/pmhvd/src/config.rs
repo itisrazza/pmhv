@@ -24,6 +24,7 @@ pub struct Config {
     pub http: HttpConfig,
     pub qemu: QemuConfig,
     pub images: ImagesConfig,
+    pub thumbnails: ThumbnailsConfig,
     /// Path to `pmhv-shim`. Defaults to the one next to `pmhvd`.
     pub shim: Option<PathBuf>,
 }
@@ -59,6 +60,19 @@ pub struct ImagesConfig {
     /// Extra storage groups by name. The `default` group is always `<data dir>/images/default`
     /// unless overridden here.
     pub groups: BTreeMap<String, PathBuf>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ThumbnailsConfig {
+    /// Seconds between captures of a running machine's screen.
+    pub interval_secs: u64,
+}
+
+impl Default for ThumbnailsConfig {
+    fn default() -> Self {
+        Self { interval_secs: 300 }
+    }
 }
 
 impl Config {

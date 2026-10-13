@@ -10,6 +10,9 @@ use tracing::warn;
 
 use crate::machine::Machine;
 
+/// Enough for a screenful or two of a terminal.
+const SCROLLBACK_TAIL: usize = 16 * 1024;
+
 pub async fn serve(machine: Arc<Machine>, listener: UnixListener) {
     loop {
         match listener.accept().await {
@@ -63,6 +66,10 @@ async fn handle(machine: &Machine, stream: UnixStream) -> Result<(), pmhv_driver
                 },
             };
             write_message(&mut write, &response).await
+        }
+        Request::Scrollback => {
+            let text = String::from_utf8_lossy(&machine.console.tail(SCROLLBACK_TAIL)).into_owned();
+            write_message(&mut write, &Response::Scrollback { text }).await
         }
         Request::Screenshot { path } => {
             let response = match machine.screenshot(&path).await {

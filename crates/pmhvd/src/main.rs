@@ -10,6 +10,7 @@ mod paths;
 mod resolve;
 mod server;
 mod store;
+mod thumbnails;
 mod ui;
 
 use std::io::IsTerminal;
@@ -119,5 +120,6 @@ fn context(config: &Config, paths: &Paths) -> Result<Context, DaemonError> {
         qemu: config.qemu.clone(),
         runtime_dir: paths.runtime_dir.clone(),
         shim,
+        thumbnail_interval: std::time::Duration::from_secs(config.thumbnails.interval_secs),
     })
 }

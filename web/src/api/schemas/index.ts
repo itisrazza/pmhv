@@ -29,3 +29,5 @@ export * from './networkSpec';
 export * from './newDisk';
 export * from './powerAction';
 export * from './powerRequest';
+export * from './thumbnail';
+export * from './thumbnailKind';

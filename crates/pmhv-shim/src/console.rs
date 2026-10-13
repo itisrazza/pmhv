@@ -64,6 +64,13 @@ impl Console {
         });
     }
 
+    /// The last `bytes` of scrollback.
+    pub fn tail(&self, bytes: usize) -> Vec<u8> {
+        let scrollback = lock(&self.scrollback);
+        let skip = scrollback.len().saturating_sub(bytes);
+        scrollback.iter().skip(skip).copied().collect()
+    }
+
     fn publish(&self, bytes: &[u8]) {
         // Holding the lock while broadcasting keeps subscribers from missing or repeating bytes.
         let mut scrollback = lock(&self.scrollback);

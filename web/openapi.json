@@ -599,6 +599,17 @@
           },
           "state": {
             "$ref": "#/components/schemas/MachineState"
+          },
+          "thumbnail": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Thumbnail",
+                "description": "The most recent capture of the machine's screen, if there's been one."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -718,6 +729,31 @@
             "$ref": "#/components/schemas/PowerAction"
           }
         }
+      },
+      "Thumbnail": {
+        "type": "object",
+        "required": [
+          "kind",
+          "captured_at"
+        ],
+        "properties": {
+          "captured_at": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When it was captured, in milliseconds since the Unix epoch. Changes with every capture.",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ThumbnailKind"
+          }
+        }
+      },
+      "ThumbnailKind": {
+        "type": "string",
+        "enum": [
+          "image",
+          "text"
+        ]
       }
     }
   }

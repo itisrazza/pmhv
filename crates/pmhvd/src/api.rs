@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::extract::{OriginalUri, Path, State, WebSocketUpgrade};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -12,7 +12,7 @@ use futures_util::StreamExt;
 use pmhv_model::report::error_chain;
 use pmhv_model::{
     ApiError, CreateMachineRequest, Event, HostInfo, ImageGroup, Machine, MachineId, MachineSpec,
-    PowerRequest,
+    PowerRequest, ThumbnailKind,
 };
 use tokio::net::UnixStream;
 use tokio::sync::watch;
@@ -59,6 +59,7 @@ pub fn router(state: AppState) -> Router {
         .route("/machines/{id}/power", post(power))
         .route("/machines/{id}/console/serial", get(serial_console))
         .route("/machines/{id}/console/vnc", get(vnc_console))
+        .route("/machines/{id}/thumbnail", get(thumbnail))
         .route("/images", get(list_images))
         .route("/events", get(events));
     Router::new()
@@ -239,7 +240,7 @@ async fn serial_console(
     upgrade: WebSocketUpgrade,
 ) -> ApiResult<Response> {
     let path = machines.console_socket(id)?;
-    proxy(upgrade, &path).await
+    proxy(upgrade, &path, machines, id).await
 }
 
 async fn vnc_console(
@@ -249,10 +250,15 @@ async fn vnc_console(
 ) -> ApiResult<Response> {
     let path = machines.vnc_socket(id)?;
     // noVNC asks for the "binary" subprotocol.
-    proxy(upgrade.protocols(["binary"]), &path).await
+    proxy(upgrade.protocols(["binary"]), &path, machines, id).await
 }
 
-async fn proxy(upgrade: WebSocketUpgrade, path: &std::path::Path) -> ApiResult<Response> {
+async fn proxy(
+    upgrade: WebSocketUpgrade,
+    path: &std::path::Path,
+    machines: Arc<Machines>,
+    id: MachineId,
+) -> ApiResult<Response> {
     let stream = UnixStream::connect(path)
         .await
         .map_err(|error| ApiFailure {
@@ -263,7 +269,42 @@ async fn proxy(upgrade: WebSocketUpgrade, path: &std::path::Path) -> ApiResult<R
                 path.display()
             ),
         })?;
-    Ok(upgrade.on_upgrade(move |socket| console::pipe(socket, stream)))
+    Ok(upgrade.on_upgrade(move |socket| async move {
+        console::pipe(socket, stream).await;
+        // Someone just looked at the screen; make the card show what they last saw.
+        machines.capture_thumbnail(id).await;
+    }))
+}
+
+/// The machine's last screen capture: a PNG, or plain text for text consoles.
+async fn thumbnail(
+    State(AppState { machines, .. }): State<AppState>,
+    Path(id): Path<MachineId>,
+) -> ApiResult<Response> {
+    let Some((thumbnail, path)) = machines.thumbnail_file(id)? else {
+        return Err(ApiFailure {
+            status: StatusCode::NOT_FOUND,
+            code: "not_found",
+            message: "no thumbnail captured yet".to_owned(),
+        });
+    };
+    let body = tokio::fs::read(&path).await.map_err(|error| ApiFailure {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        code: "internal",
+        message: format!("failed to read {}: {error}", path.display()),
+    })?;
+    let content_type = match thumbnail.kind {
+        ThumbnailKind::Image => "image/png",
+        ThumbnailKind::Text => "text/plain; charset=utf-8",
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "no-cache"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 /// Server-sent events: machine changes, plus `lagged` if this client fell behind and should refetch.

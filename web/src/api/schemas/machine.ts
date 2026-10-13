@@ -7,6 +7,7 @@
  */
 import type { MachineSpec } from './machineSpec';
 import type { MachineState } from './machineState';
+import type { Thumbnail } from './thumbnail';
 
 export interface Machine {
   /** True when the guest architecture differs from the host's, so it runs under emulation. */
@@ -19,4 +20,5 @@ export interface Machine {
   last_error?: string | null;
   spec: MachineSpec;
   state: MachineState;
+  thumbnail?: Thumbnail | null;
 }

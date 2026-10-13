@@ -14,8 +14,14 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 pub enum Request {
     Status,
     Watch,
-    Power { action: ShimPower },
-    Screenshot { path: std::path::PathBuf },
+    Power {
+        action: ShimPower,
+    },
+    Screenshot {
+        path: std::path::PathBuf,
+    },
+    /// The tail of the serial console's scrollback, as raw bytes decoded lossily.
+    Scrollback,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -33,6 +39,7 @@ pub enum ShimPower {
 pub enum Response {
     Status(ShimStatus),
     Ok,
+    Scrollback { text: String },
     Error { message: String },
 }
 

@@ -14,22 +14,26 @@ use pmhv_driver::{
 };
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    Arch, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageRef, Machine, MachineId,
-    MachineSpec, MachineState, PowerAction,
+    Arch, ConsoleKind, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageRef, Machine,
+    MachineId, MachineSpec, MachineState, PowerAction, Thumbnail, ThumbnailKind,
 };
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tokio::process::Command;
 use tokio::sync::{broadcast, oneshot};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::config::QemuConfig;
 use crate::images::{DEFAULT_GROUP, ImageError, ImageStore};
 use crate::resolve::{ResolveError, Resolver};
 use crate::store::{MachineStore, StoreError};
+use crate::thumbnails;
 
 /// How long a freshly spawned shim has to open its control socket.
 const SHIM_STARTUP: Duration = Duration::from_secs(15);
+
+/// Long enough after starting for there to usually be something on screen.
+const FIRST_THUMBNAIL_AFTER: Duration = Duration::from_secs(10);
 
 #[derive(Debug, thiserror::Error)]
 pub enum MachineError {
@@ -69,12 +73,17 @@ pub struct Context {
     pub qemu: QemuConfig,
     pub runtime_dir: PathBuf,
     pub shim: PathBuf,
+    pub thumbnail_interval: Duration,
 }
 
 struct Entry {
     spec: MachineSpec,
     state: MachineState,
     last_error: Option<String>,
+    thumbnail: Option<Thumbnail>,
+    /// Bumped each time the machine starts, so a previous run's background tasks can tell
+    /// they're stale.
+    run: u64,
 }
 
 pub struct Machines {
@@ -91,10 +100,13 @@ impl Machines {
             .load_all()?
             .into_iter()
             .map(|(id, spec)| {
+                let thumbnail = thumbnails::current(&ctx.store.machine_dir(id));
                 let entry = Entry {
                     spec,
                     state: MachineState::Stopped,
                     last_error: None,
+                    thumbnail: thumbnail.map(|(thumbnail, _)| thumbnail),
+                    run: 0,
                 };
                 (id, entry)
             })
@@ -160,6 +172,8 @@ impl Machines {
             spec,
             state: MachineState::Stopped,
             last_error: None,
+            thumbnail: None,
+            run: 0,
         };
         let machine = view(id, &entry);
         self.lock().insert(id, entry);
@@ -237,7 +251,10 @@ impl Machines {
             )
             .await?
         {
-            Response::Ok | Response::Status(_) => self.get(id),
+            Response::Ok => self.get(id),
+            other @ (Response::Status(_) | Response::Scrollback { .. }) => {
+                Err(MachineError::Shim(format!("unexpected reply {other:?}")))
+            }
             Response::Error { message } => Err(MachineError::Shim(message)),
         }
     }
@@ -261,28 +278,31 @@ impl Machines {
 
     fn require_live(&self, id: MachineId) -> Result<Machine, MachineError> {
         let machine = self.get(id)?;
-        match machine.state {
-            MachineState::Running | MachineState::Paused | MachineState::Stopping => Ok(machine),
-            MachineState::Stopped | MachineState::Starting => Err(MachineError::Conflict(
+        if is_live(machine.state) {
+            Ok(machine)
+        } else {
+            Err(MachineError::Conflict(
                 "the machine isn't running".to_owned(),
-            )),
+            ))
         }
     }
 
     fn start(self: &Arc<Self>, id: MachineId) -> Result<(), MachineError> {
-        let spec = {
+        let (spec, run) = {
             let mut entries = self.lock();
             let entry = entries.get_mut(&id).ok_or(MachineError::NotFound(id))?;
             require_stopped(entry, "started")?;
             entry.state = MachineState::Starting;
             entry.last_error = None;
-            entry.spec.clone()
+            entry.run += 1;
+            (entry.spec.clone(), entry.run)
         };
         self.emit_machine(id);
 
         match self.spawn_shim(id, &spec) {
             Ok(exited) => {
                 tokio::spawn(Arc::clone(self).supervise(id, Some(exited)));
+                tokio::spawn(Arc::clone(self).capture_periodically(id, run));
                 Ok(())
             }
             Err(error) => {
@@ -380,7 +400,7 @@ impl Machines {
 
     /// Returns the shim's final status if it sent one before closing.
     async fn watch(
-        &self,
+        self: &Arc<Self>,
         id: MachineId,
         dir: &MachineRuntimeDir,
         exited: Option<oneshot::Receiver<()>>,
@@ -426,7 +446,12 @@ impl Machines {
                 Ok(Response::Status(status)) if !status.exited => {
                     info!(%id, state = ?status.state, "reattached to running machine");
                     self.set_status(id, status.state, status.error);
+                    let run = self.lock().get_mut(&id).map_or(0, |entry| {
+                        entry.run += 1;
+                        entry.run
+                    });
                     tokio::spawn(Arc::clone(self).supervise(id, None));
+                    tokio::spawn(Arc::clone(self).capture_periodically(id, run));
                 }
                 _ => {
                     if let Some(status) = read_exit_file(&dir) {
@@ -454,8 +479,8 @@ impl Machines {
             .ok_or(MachineError::ShimNoReply)
     }
 
-    fn set_status(&self, id: MachineId, state: MachineState, error: Option<String>) {
-        {
+    fn set_status(self: &Arc<Self>, id: MachineId, state: MachineState, error: Option<String>) {
+        let previous = {
             let mut entries = self.lock();
             let Some(entry) = entries.get_mut(&id) else {
                 return;
@@ -463,10 +488,107 @@ impl Machines {
             if entry.state == state && entry.last_error == error {
                 return;
             }
+            let previous = entry.state;
             entry.state = state;
             entry.last_error = error;
+            previous
+        };
+        self.emit_machine(id);
+        // The guest's on its way down: grab its last screen while there's still one to grab.
+        if state == MachineState::Stopping && previous != MachineState::Stopping {
+            let machines = Arc::clone(self);
+            tokio::spawn(async move { machines.capture_thumbnail(id).await });
+        }
+    }
+
+    /// Captures soon after start, then every `thumbnail_interval`, until this run ends.
+    async fn capture_periodically(self: Arc<Self>, id: MachineId, run: u64) {
+        tokio::time::sleep(FIRST_THUMBNAIL_AFTER).await;
+        loop {
+            let current = self.lock().get(&id).map(|entry| (entry.run, entry.state));
+            match current {
+                Some((current_run, state)) if current_run == run && is_live(state) => {}
+                _ => return,
+            }
+            self.capture_thumbnail(id).await;
+            tokio::time::sleep(self.ctx.thumbnail_interval).await;
+        }
+    }
+
+    /// Captures the machine's screen now, if it's running. Failures are logged, not returned:
+    /// a missing thumbnail isn't worth interrupting anything for.
+    pub async fn capture_thumbnail(&self, id: MachineId) {
+        let Ok(machine) = self.get(id) else {
+            return;
+        };
+        if !is_live(machine.state) {
+            return;
+        }
+        let dir = self.ctx.store.machine_dir(id);
+        let captured = match machine.spec.console {
+            ConsoleKind::Graphical => self.capture_image(id, &dir).await,
+            ConsoleKind::Text => self.capture_text(id, &dir).await,
+        };
+        let kind = match captured {
+            Ok(kind) => kind,
+            Err(error) => {
+                debug!(%id, error = error_chain(&error), "thumbnail capture failed");
+                return;
+            }
+        };
+        if let Some(entry) = self.lock().get_mut(&id) {
+            entry.thumbnail = Some(Thumbnail {
+                kind,
+                captured_at: thumbnails::now_millis(),
+            });
         }
         self.emit_machine(id);
+    }
+
+    async fn capture_image(
+        &self,
+        id: MachineId,
+        dir: &Path,
+    ) -> Result<ThumbnailKind, MachineError> {
+        let path = thumbnails::image_file(dir);
+        let temporary = path.with_extension("png.tmp");
+        let request = Request::Screenshot {
+            path: temporary.clone(),
+        };
+        match self.shim_request(id, &request).await? {
+            Response::Ok => {}
+            Response::Error { message } => return Err(MachineError::Shim(message)),
+            other => return Err(MachineError::Shim(format!("unexpected reply {other:?}"))),
+        }
+        let io_error = |source| MachineError::Prepare {
+            path: path.clone(),
+            source,
+        };
+        std::fs::rename(&temporary, &path).map_err(io_error)?;
+        thumbnails::remove_if_present(&thumbnails::text_file(dir)).map_err(io_error)?;
+        Ok(ThumbnailKind::Image)
+    }
+
+    async fn capture_text(&self, id: MachineId, dir: &Path) -> Result<ThumbnailKind, MachineError> {
+        let text = match self.shim_request(id, &Request::Scrollback).await? {
+            Response::Scrollback { text } => text,
+            Response::Error { message } => return Err(MachineError::Shim(message)),
+            other => return Err(MachineError::Shim(format!("unexpected reply {other:?}"))),
+        };
+        thumbnails::write_text(dir, &text).map_err(|source| MachineError::Prepare {
+            path: thumbnails::text_file(dir),
+            source,
+        })?;
+        Ok(ThumbnailKind::Text)
+    }
+
+    /// The machine's newest thumbnail file.
+    pub fn thumbnail_file(
+        &self,
+        id: MachineId,
+    ) -> Result<Option<(Thumbnail, PathBuf)>, MachineError> {
+        self.get(id)?;
+        Ok(thumbnails::current(&self.ctx.store.machine_dir(id)))
     }
 
     fn emit_machine(&self, id: MachineId) {
@@ -504,7 +626,15 @@ fn view(id: MachineId, entry: &Entry) -> Machine {
         state: entry.state,
         emulated: Arch::host() != Some(entry.spec.arch),
         last_error: entry.last_error.clone(),
+        thumbnail: entry.thumbnail,
     }
+}
+
+fn is_live(state: MachineState) -> bool {
+    matches!(
+        state,
+        MachineState::Running | MachineState::Paused | MachineState::Stopping
+    )
 }
 
 fn require_stopped(entry: &Entry, verb: &str) -> Result<(), MachineError> {

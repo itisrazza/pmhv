@@ -15,5 +15,5 @@ pub use image::{ImageFormat, ImageGroup, ImageInfo};
 pub use machine::{
     Arch, Backend, ConsoleKind, CreateMachineRequest, DiskBus, DiskMedia, DiskSpec, Firmware,
     GuestOs, ImageRef, Machine, MachineId, MachineSpec, MachineState, NetworkSpec, NewDisk,
-    PowerAction, PowerRequest,
+    PowerAction, PowerRequest, Thumbnail, ThumbnailKind,
 };
