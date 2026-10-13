@@ -8,7 +8,7 @@
 
 Proxmox and Hyper-V Server want the whole machine. Desktop apps like UTM want you sitting in front of it. pmhv sits in between: a background service on your MacBook (or Linux box, or eventually Windows desktop) with a browser UI for creating, running and reaching your VMs, without replacing the host OS.
 
-> **Status: planning.** There's no code yet. The design and roadmap are below; nothing here works until the first milestones land.
+> **Status: early development.** The daemon, CLI and web UI shell exist, but there's no VM support yet. See the [roadmap](docs/roadmap.md) for what's next and [development](docs/development.md) to run it.
 
 ## Planned features
 
