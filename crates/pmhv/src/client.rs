@@ -1,12 +1,13 @@
 use std::io;
 use std::path::PathBuf;
 
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
-use hyper::header::{ACCEPT, HOST};
-use hyper::{Request, StatusCode};
+use hyper::header::{ACCEPT, CONTENT_TYPE, HOST};
+use hyper::{Method, Request, StatusCode};
 use hyper_util::rt::TokioIo;
 use pmhv_model::ApiError;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
 use tokio::net::UnixStream;
 
@@ -33,6 +34,11 @@ pub enum ClientError {
         status: StatusCode,
         body: String,
     },
+    #[error("cannot encode the request for {path}")]
+    Encode {
+        path: String,
+        source: serde_json::Error,
+    },
     #[error("cannot decode pmhvd's response for {path}")]
     Decode {
         path: String,
@@ -51,6 +57,31 @@ impl Client {
     }
 
     pub async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T, ClientError> {
+        let body = self.send(Method::GET, path, None).await?;
+        decode(path, &body)
+    }
+
+    pub async fn post<B: Serialize, T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &B,
+    ) -> Result<T, ClientError> {
+        let body = self
+            .send(Method::POST, path, Some(encode(path, body)?))
+            .await?;
+        decode(path, &body)
+    }
+
+    pub async fn delete(&self, path: &str) -> Result<(), ClientError> {
+        self.send(Method::DELETE, path, None).await.map(|_| ())
+    }
+
+    async fn send(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+    ) -> Result<Bytes, ClientError> {
         let stream =
             UnixStream::connect(&self.socket)
                 .await
@@ -63,10 +94,16 @@ impl Client {
         // Connection failures also surface through `send_request`, which is where they're reported.
         tokio::spawn(connection);
 
-        let request = Request::get(path)
+        let mut request = Request::builder()
+            .method(method)
+            .uri(path)
             .header(HOST, "pmhvd")
-            .header(ACCEPT, "application/json")
-            .body(Empty::<Bytes>::new())
+            .header(ACCEPT, "application/json");
+        if body.is_some() {
+            request = request.header(CONTENT_TYPE, "application/json");
+        }
+        let request = request
+            .body(Full::new(Bytes::from(body.unwrap_or_default())))
             .map_err(|source| ClientError::Request {
                 path: path.to_owned(),
                 source,
@@ -89,9 +126,20 @@ impl Client {
                 },
             });
         }
-        serde_json::from_slice(&body).map_err(|source| ClientError::Decode {
-            path: path.to_owned(),
-            source,
-        })
+        Ok(body)
     }
+}
+
+fn encode<B: Serialize>(path: &str, body: &B) -> Result<Vec<u8>, ClientError> {
+    serde_json::to_vec(body).map_err(|source| ClientError::Encode {
+        path: path.to_owned(),
+        source,
+    })
+}
+
+fn decode<T: DeserializeOwned>(path: &str, body: &[u8]) -> Result<T, ClientError> {
+    serde_json::from_slice(body).map_err(|source| ClientError::Decode {
+        path: path.to_owned(),
+        source,
+    })
 }
