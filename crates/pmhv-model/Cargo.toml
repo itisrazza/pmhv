@@ -1,0 +1,15 @@
+[package]
+name = "pmhv-model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+dirs = "7.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+utoipa = "6.0.0"
