@@ -288,38 +288,7 @@ docs/
 justfile
 ```
 
-`just` recipes: `dev` (daemon + Vite with proxy), `build`, `sign` (macOS entitlements), `check`, `fmt`, `lint`, `test`.
-
-## Testing
-
-Deferred until after the initial buildout (roughly milestone 3), once the shape of the code has settled. Then:
-
-- Table-driven unit tests for the pure parts: the QEMU command-line builder, spec validation against capabilities, config parsing, path confinement.
-- A fake QMP server to test the QEMU driver's control flow without running QEMU.
-- Integration tests that boot a tiny guest (a minimal Linux kernel and initramfs) under QEMU, on macOS (HVF) and Linux (KVM where available, TCG otherwise), driven through the CLI.
-- VZ integration tests on macOS only, run locally; CI runners may not allow nested virtualisation.
-
-## Milestones
-
-1. **Skeleton.** Workspace, `pmhvd` serving an empty embedded UI, config loading, `pmhv` CLI talking to it, CI on macOS + Linux.
-2. **QEMU on macOS and Linux, headless.** Machine spec, create/start/stop/pause via shim, serial console in the browser, daemon restart without killing VMs.
-3. **Graphical console and thumbnails** for QEMU. Console tab with keyboard/mouse toolbar, virtual keyboard and mouse. TPM via `swtpm`, so Windows 11 guests work. The Machines grid, detail page and basic create dialog. Tests start here.
-4. **Auth.** Single-user sign-in with password and/or passkey, temporary first-launch password, sessions, log out, CLI reset. Needed before pmhv is left running for long.
-5. **Disk images.** Storage groups, upload/download, create blank, convert, resize.
-6. **Virtualization.framework backend.** macOS guests from IPSW, guest-VNC and serial consoles. Linux guests on VZ as an opt-in.
-
-Milestones 1–6 are the **MVP**. After that, roughly in order:
-
-7. **VZ private API spike** for a host-side graphical console (see [Consoles](#consoles)).
-8. **Networking and isolation.** Userspace switch, isolated networks, DHCP, port forwards, egress policy and logging.
-9. **Packaging.** Signed and notarised macOS builds, known-good QEMU and `swtpm` builds shipped with pmhv, service install.
-10. **Windows.** QEMU + WHPX, named pipes, service install.
-
-Snapshots, cloning, cloud-init/unattended install, and import from UTM/VirtualBox are candidates after that.
-
-## Licence
-
-pmhv is dual-licensed under MIT or Apache-2.0, at the user's option — the usual choice for Rust projects. Licensing metadata follows the [REUSE](https://reuse.software/) layout (`REUSE.toml`, `LICENSES/`), as in `@swopstar/react-ui`.
+Build commands, testing and conventions are in [development.md](development.md); milestones are in [roadmap.md](roadmap.md).
 
 ## Open questions
 
