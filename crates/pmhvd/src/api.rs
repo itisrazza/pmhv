@@ -1,10 +1,11 @@
 use std::convert::Infallible;
 use std::sync::Arc;
-
-use axum::body::Body;
-use axum::extract::{DefaultBodyLimit, OriginalUri, Path, Request, State, WebSocketUpgrade};
 use std::time::Duration;
 
+use axum::body::Body;
+use axum::extract::{
+    DefaultBodyLimit, FromRequest, OriginalUri, Path, Request, State, WebSocketUpgrade,
+};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
@@ -20,6 +21,7 @@ use pmhv_model::{
     PowerRequest, Preferences, ResizeImageRequest, SetPasswordRequest, TemporaryPassword,
     ThumbnailKind,
 };
+use serde::de::DeserializeOwned;
 use tokio::net::UnixStream;
 use tokio::sync::watch;
 use tokio_stream::wrappers::BroadcastStream;
@@ -217,6 +219,24 @@ fn image_failure(error: &ImageError, message: String) -> ApiFailure {
 
 type ApiResult<T> = Result<T, ApiFailure>;
 
+/// Like `Json`, but a malformed body gets the API's JSON error rather than plain text.
+pub struct JsonBody<T>(pub T);
+
+impl<S: Send + Sync, T: DeserializeOwned> FromRequest<S> for JsonBody<T> {
+    type Rejection = ApiFailure;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        match Json::<T>::from_request(request, state).await {
+            Ok(Json(value)) => Ok(Self(value)),
+            Err(rejection) => Err(ApiFailure::new(
+                rejection.status(),
+                "invalid_request",
+                rejection.body_text(),
+            )),
+        }
+    }
+}
+
 /// Slows down password guessing without making a typo painful.
 const FAILED_LOGIN_DELAY: Duration = Duration::from_millis(750);
 
@@ -229,7 +249,7 @@ const FAILED_LOGIN_DELAY: Duration = Duration::from_millis(750);
     ))]
 async fn login(
     State(AppState { auth, .. }): State<AppState>,
-    Json(request): Json<LoginRequest>,
+    JsonBody(request): JsonBody<LoginRequest>,
 ) -> ApiResult<Response> {
     let (token, kind) = match auth.login(&request.password).await {
         Ok(session) => session,
@@ -288,7 +308,7 @@ async fn session(
 async fn set_password(
     State(AppState { auth, .. }): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<SetPasswordRequest>,
+    JsonBody(request): JsonBody<SetPasswordRequest>,
 ) -> ApiResult<Json<AuthStatus>> {
     let token = access::session_token(&headers).ok_or(AuthError::NoSession)?;
     auth.set_password(&token, &request.password).await?;
@@ -320,7 +340,7 @@ async fn get_preferences(
     responses((status = 200, description = "Saved", body = Preferences)))]
 async fn set_preferences(
     State(AppState { preferences, .. }): State<AppState>,
-    Json(new): Json<Preferences>,
+    JsonBody(new): JsonBody<Preferences>,
 ) -> ApiResult<Json<Preferences>> {
     preferences.set(new.clone()).map_err(|error| {
         ApiFailure::new(
@@ -357,7 +377,7 @@ async fn list_machines(State(AppState { machines, .. }): State<AppState>) -> Jso
     ))]
 async fn create_machine(
     State(AppState { machines, .. }): State<AppState>,
-    Json(request): Json<CreateMachineRequest>,
+    JsonBody(request): JsonBody<CreateMachineRequest>,
 ) -> ApiResult<(StatusCode, Json<Machine>)> {
     Ok((StatusCode::CREATED, Json(machines.create(request).await?)))
 }
@@ -387,7 +407,7 @@ async fn get_machine(
 async fn update_machine(
     State(AppState { machines, .. }): State<AppState>,
     Path(id): Path<MachineId>,
-    Json(spec): Json<MachineSpec>,
+    JsonBody(spec): JsonBody<MachineSpec>,
 ) -> ApiResult<Json<Machine>> {
     Ok(Json(machines.update(id, spec)?))
 }
@@ -418,7 +438,7 @@ async fn delete_machine(
 async fn power(
     State(AppState { machines, .. }): State<AppState>,
     Path(id): Path<MachineId>,
-    Json(request): Json<PowerRequest>,
+    JsonBody(request): JsonBody<PowerRequest>,
 ) -> ApiResult<Json<Machine>> {
     Ok(Json(machines.power(id, request.action).await?))
 }
@@ -439,7 +459,7 @@ async fn list_images(
     ))]
 async fn create_image(
     State(AppState { machines, .. }): State<AppState>,
-    Json(request): Json<CreateImageRequest>,
+    JsonBody(request): JsonBody<CreateImageRequest>,
 ) -> ApiResult<(StatusCode, Json<ImageRef>)> {
     let image = ImageRef {
         group: request.group,
@@ -528,7 +548,7 @@ async fn delete_image(
 async fn resize_image(
     State(AppState { machines, .. }): State<AppState>,
     Path((group, name)): Path<(String, String)>,
-    Json(request): Json<ResizeImageRequest>,
+    JsonBody(request): JsonBody<ResizeImageRequest>,
 ) -> ApiResult<StatusCode> {
     machines
         .resize_image(&ImageRef { group, name }, request.size_gib)
@@ -547,7 +567,7 @@ async fn resize_image(
 async fn convert_image(
     State(AppState { machines, .. }): State<AppState>,
     Path((group, name)): Path<(String, String)>,
-    Json(request): Json<ConvertImageRequest>,
+    JsonBody(request): JsonBody<ConvertImageRequest>,
 ) -> ApiResult<(StatusCode, Json<Job>)> {
     let job = machines.convert_image(ImageRef { group, name }, request)?;
     Ok((StatusCode::ACCEPTED, Json(job)))

@@ -19,13 +19,12 @@ mod ui;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use pmhv_model::report::error_chain;
 use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
-
-use std::sync::Arc;
 
 use crate::auth::{Auth, AuthError};
 use crate::config::{Config, ConfigError};

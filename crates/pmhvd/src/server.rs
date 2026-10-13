@@ -2,13 +2,12 @@ use std::io;
 use std::net::SocketAddr;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::Router;
 use tokio::net::{TcpListener, UnixListener, UnixStream};
 use tokio::sync::watch;
 use tracing::info;
-
-use std::sync::Arc;
 
 use crate::api::{self, AppState};
 use crate::auth::Auth;
