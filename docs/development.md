@@ -48,6 +48,12 @@ cargo run -p pmhv -- create spec.toml --disk-gib 32
 cargo run -p pmhv -- start "Debian"
 ```
 
+```bash
+cargo run -p pmhv -- console "Debian"
+```
+
+`pmhv console` attaches the terminal to the machine's serial console (scrollback first); Ctrl+] detaches.
+
 A spec file is the same TOML as a machine's `machine.toml`:
 
 ```toml

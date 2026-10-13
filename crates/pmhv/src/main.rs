@@ -2,6 +2,7 @@
 compile_error!("pmhv only supports unix hosts for now; Windows support is planned");
 
 mod client;
+mod console;
 mod service;
 
 use std::path::PathBuf;
@@ -76,6 +77,10 @@ enum Command {
     Resume {
         machine: String,
     },
+    /// Attach this terminal to a running machine's serial console. Ctrl+] detaches.
+    Console {
+        machine: String,
+    },
     /// List storage groups and their images.
     Images,
     /// Manage the web UI's sign-in.
@@ -132,6 +137,8 @@ enum CliError {
     Client(#[from] ClientError),
     #[error(transparent)]
     Service(#[from] service::ServiceError),
+    #[error(transparent)]
+    Console(#[from] console::ConsoleError),
     #[error("failed to render JSON")]
     Json(#[source] serde_json::Error),
     #[error("failed to read spec file {path}")]
@@ -228,7 +235,26 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 println!("Sign in with it in the web UI, then choose a new password.");
             })
         }
-        Command::Service(ServiceCommand::Install { pmhvd, print }) => {
+        Command::Service(command) => run_service(command),
+        Command::Console { machine } => {
+            let machine = find(&client, &machine).await?;
+            let socket = runtime_dir
+                .join("m")
+                .join(machine.id.to_string())
+                .join("con.sock");
+            console::attach(&socket, &machine.spec.name).await?;
+            Ok(())
+        }
+        Command::Images => {
+            let groups: Vec<ImageGroup> = client.get("/api/v1/images").await?;
+            output.print(&groups, || print_images(&groups))
+        }
+    }
+}
+
+fn run_service(command: ServiceCommand) -> Result<(), CliError> {
+    match command {
+        ServiceCommand::Install { pmhvd, print } => {
             let daemon = match pmhvd {
                 Some(path) => path,
                 None => service::default_daemon()?,
@@ -245,14 +271,10 @@ async fn run(cli: Cli) -> Result<(), CliError> {
             }
             Ok(())
         }
-        Command::Service(ServiceCommand::Uninstall) => {
+        ServiceCommand::Uninstall => {
             let path = service::uninstall()?;
             println!("stopped pmhvd and removed {}", path.display());
             Ok(())
-        }
-        Command::Images => {
-            let groups: Vec<ImageGroup> = client.get("/api/v1/images").await?;
-            output.print(&groups, || print_images(&groups))
         }
     }
 }
