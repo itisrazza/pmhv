@@ -26,9 +26,11 @@ import type {
 
 import type {
   ApiError,
+  ConvertImageRequest,
   CreateImageRequest,
   ImageGroup,
   ImageRef,
+  Job,
   ResizeImageRequest
 } from '../schemas';
 
@@ -394,6 +396,96 @@ export const useDeleteImage = <TError = ErrorType<ApiError>,
         TContext
       > => {
       return useMutation(getDeleteImageMutationOptions(options), queryClient);
+    }
+    export const getConvertImageUrl = (group: string,
+    name: string,) => {
+
+
+
+
+  return `/api/v1/images/${group}/${name}/convert`
+}
+
+/**
+ * @summary Starts converting an image into a new one in the same group, as a job.
+ */
+export const convertImage = async (group: string,
+    name: string,
+    convertImageRequest: ConvertImageRequest, options?: Parameters<typeof apiClient>[1]): Promise<Job> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return apiClient<Job>(getConvertImageUrl(group,name),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(convertImageRequest)
+  }
+);}
+
+
+
+
+
+export const getConvertImageMutationKey = () => ['convertImage'] as const;
+
+export const getConvertImageMutationOptions = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof convertImage>>, TError,ConvertImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof convertImage>>, TError,ConvertImageMutationVariables, TContext> => {
+
+const mutationKey = getConvertImageMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof convertImage>>, ConvertImageMutationVariables> = (props) => {
+          const {group,name,data} = props ?? {};
+
+          return  convertImage(group,name,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ConvertImageMutationResult = NonNullable<Awaited<ReturnType<typeof convertImage>>>
+    export type ConvertImageMutationBody = ConvertImageRequest
+    export type ConvertImageMutationError = ErrorType<ApiError>
+    export type ConvertImageMutationVariables = {group: string;name: string;data: ConvertImageRequest}
+
+    /**
+ * @summary Starts converting an image into a new one in the same group, as a job.
+ */
+export const useConvertImage = <TError = ErrorType<ApiError>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof convertImage>>, TError,ConvertImageMutationVariables, TContext>, request?: SecondParameter<typeof apiClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof convertImage>>,
+        TError,
+        ConvertImageMutationVariables,
+        TContext
+      > => {
+      return useMutation(getConvertImageMutationOptions(options), queryClient);
     }
     export const getResizeImageUrl = (group: string,
     name: string,) => {

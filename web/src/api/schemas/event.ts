@@ -5,6 +5,7 @@
  * Poor Man's HyperVisor daemon API
  * OpenAPI spec version: 0.1.0
  */
+import type { Job } from './job';
 import type { Machine } from './machine';
 
 /**
@@ -16,4 +17,7 @@ export type Event = {
 } | {
   id: string;
   type: 'machine_removed';
+} | {
+  job: Job;
+  type: 'job_updated';
 };

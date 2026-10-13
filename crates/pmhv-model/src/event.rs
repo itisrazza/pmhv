@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::Job;
 use crate::machine::{Machine, MachineId};
 
 /// Pushed to clients on the event stream.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
     MachineUpdated {
@@ -13,5 +14,8 @@ pub enum Event {
     MachineRemoved {
         #[schema(value_type = String)]
         id: MachineId,
+    },
+    JobUpdated {
+        job: Job,
     },
 }

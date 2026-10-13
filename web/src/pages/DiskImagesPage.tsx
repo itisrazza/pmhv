@@ -17,6 +17,7 @@ import {
   HardDrive,
   Menu,
   Plus,
+  Repeat,
   Scaling,
   Trash2,
   Upload,
@@ -26,6 +27,7 @@ import type { ImageGroup, ImageInfo } from "../api/schemas";
 import { EmptyState } from "../components/EmptyState";
 import { PageTitle } from "../components/PageHeaderSlot";
 import {
+  ConvertImageDialog,
   DeleteImageDialog,
   NewImageDialog,
   ResizeImageDialog,
@@ -45,7 +47,9 @@ function downloadUrl(image: ImageInfo): string {
 }
 
 function ImageRow({ image }: { image: ImageInfo }) {
-  const [dialog, setDialog] = useState<"resize" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"resize" | "convert" | "delete" | null>(
+    null,
+  );
   const iso = image.format === "iso";
   const Icon = iso ? Disc3 : HardDrive;
   const inUse = image.used_by.length > 0;
@@ -88,11 +92,24 @@ function ImageRow({ image }: { image: ImageInfo }) {
             >
               <Scaling /> Resize…
             </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={iso}
+              onClick={() => setDialog("convert")}
+            >
+              <Repeat /> Convert…
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
       {dialog === "resize" && (
         <ResizeImageDialog
+          open
+          onOpenChange={(open) => !open && setDialog(null)}
+          image={image}
+        />
+      )}
+      {dialog === "convert" && (
+        <ConvertImageDialog
           open
           onOpenChange={(open) => !open && setDialog(null)}
           image={image}

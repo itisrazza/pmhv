@@ -39,6 +39,14 @@ pub enum ImageError {
         "{name} is {current} bytes; it can only grow (shrinking would cut off the guest's data)"
     )]
     WouldShrink { name: String, current: u64 },
+    #[error("{name} should end in {expected} to hold a {format} image")]
+    WrongExtension {
+        name: String,
+        format: &'static str,
+        expected: &'static str,
+    },
+    #[error("images can only be converted to qcow2 or raw")]
+    ConvertToIso,
     #[error("ISO images can't be resized")]
     ResizeIso,
     #[error("upload failed")]
@@ -254,6 +262,87 @@ impl ImageStore {
         renamed
     }
 
+    /// Converts `source` into a new image `target` in `format`, reporting progress from 0 to 1.
+    /// The output is written to a hidden file and renamed into place when complete.
+    pub async fn convert(
+        &self,
+        source: &ImageRef,
+        target: &ImageRef,
+        format: ImageFormat,
+        progress: impl Fn(f32),
+    ) -> Result<(), ImageError> {
+        use tokio::io::AsyncReadExt;
+
+        let (source_path, source_format) = self.resolve(source)?;
+        let target_path = self.path(target)?;
+        let output_format = check_conversion_target(target, format)?;
+        let input_format = match source_format {
+            ImageFormat::Qcow2 => "qcow2",
+            ImageFormat::Raw | ImageFormat::Iso => "raw",
+        };
+        if target_path.exists() {
+            return Err(ImageError::AlreadyExists {
+                group: target.group.clone(),
+                name: target.name.clone(),
+            });
+        }
+        let dir = target_path.parent().unwrap_or(Path::new("."));
+        let partial = dir.join(format!(".{}.convert", target.name));
+
+        let mut command = Command::new(&self.qemu_img);
+        command
+            .args(["convert", "-p", "-f", input_format, "-O", output_format])
+            .arg(&source_path)
+            .arg(&partial)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        let mut child = command.spawn().map_err(|source| ImageError::Spawn {
+            program: self.qemu_img.clone(),
+            source,
+        })?;
+        let mut stdout = child.stdout.take().ok_or_else(|| ImageError::Tool {
+            program: self.qemu_img.clone(),
+            stderr: "no stdout".to_owned(),
+        })?;
+        let mut buffer = vec![0; 1024];
+        let mut pending = String::new();
+        while let Ok(count) = stdout.read(&mut buffer).await {
+            if count == 0 {
+                break;
+            }
+            pending.push_str(&String::from_utf8_lossy(&buffer[..count]));
+            if let Some(fraction) = last_progress(&pending) {
+                progress(fraction);
+            }
+            if let Some(end) = pending.rfind(['\r', '\n']) {
+                pending.drain(..=end);
+            }
+        }
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|source| ImageError::Spawn {
+                program: self.qemu_img.clone(),
+                source,
+            })?;
+        let finished = if output.status.success() {
+            std::fs::rename(&partial, &target_path).map_err(|source| ImageError::Io {
+                path: target_path.clone(),
+                source,
+            })
+        } else {
+            Err(ImageError::Tool {
+                program: self.qemu_img.clone(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            })
+        };
+        if finished.is_err() {
+            // Best effort: the hidden partial file is skipped by listings either way.
+            let _ = std::fs::remove_file(&partial);
+        }
+        finished
+    }
+
     pub fn delete(&self, image: &ImageRef) -> Result<(), ImageError> {
         let (path, _) = self.resolve(image)?;
         std::fs::remove_file(&path).map_err(|source| ImageError::Io { path, source })
@@ -303,6 +392,35 @@ impl ImageStore {
     }
 }
 
+/// Checks `target`'s name suits `format`, returning qemu-img's name for the format.
+pub fn check_conversion_target(
+    target: &ImageRef,
+    format: ImageFormat,
+) -> Result<&'static str, ImageError> {
+    let (name, expected) = match format {
+        ImageFormat::Qcow2 => ("qcow2", ".qcow2"),
+        ImageFormat::Raw => ("raw", ".img or .raw"),
+        ImageFormat::Iso => return Err(ImageError::ConvertToIso),
+    };
+    if format_of(&target.name) == Some(format) {
+        Ok(name)
+    } else {
+        Err(ImageError::WrongExtension {
+            name: target.name.clone(),
+            format: name,
+            expected,
+        })
+    }
+}
+
+/// The latest `(12.34/100%)` progress report in `qemu-img convert -p` output, as a fraction.
+fn last_progress(output: &str) -> Option<f32> {
+    output.rsplit('(').find_map(|part| {
+        let percent = part.split_once("/100%)")?.0.trim().parse::<f32>().ok()?;
+        Some((percent / 100.0).clamp(0.0, 1.0))
+    })
+}
+
 pub fn format_of(name: &str) -> Option<ImageFormat> {
     let extension = Path::new(name).extension()?.to_str()?.to_ascii_lowercase();
     match extension.as_str() {
@@ -342,6 +460,20 @@ mod tests {
         ];
         for (name, expected) in cases {
             assert_eq!(format_of(name), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn parses_qemu_img_progress() {
+        let cases = [
+            ("    (0.00/100%)\r", Some(0.0)),
+            ("    (12.50/100%)\r    (37.50/100%)\r", Some(0.375)),
+            ("    (100.00/100%)\r\n", Some(1.0)),
+            ("    (55.", None),
+            ("", None),
+        ];
+        for (output, expected) in cases {
+            assert_eq!(last_progress(output), expected, "{output:?}");
         }
     }
 

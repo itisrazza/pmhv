@@ -14,9 +14,9 @@ use pmhv_driver::{
 };
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    Arch, Backend, ConsoleKind, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageGroup,
-    ImageRef, ImageUser, Machine, MachineId, MachineSpec, MachineState, PowerAction, Thumbnail,
-    ThumbnailKind,
+    Arch, Backend, ConsoleKind, ConvertImageRequest, CreateMachineRequest, DiskMedia, DiskSpec,
+    Event, ImageGroup, ImageRef, ImageUser, Job, JobId, JobState, Machine, MachineId, MachineSpec,
+    MachineState, PowerAction, Thumbnail, ThumbnailKind,
 };
 use tokio::io::BufReader;
 use tokio::net::UnixStream;
@@ -25,7 +25,7 @@ use tokio::sync::{broadcast, oneshot};
 use tracing::{debug, info, warn};
 
 use crate::config::QemuConfig;
-use crate::images::{DEFAULT_GROUP, ImageError, ImageStore};
+use crate::images::{self, DEFAULT_GROUP, ImageError, ImageStore};
 use crate::resolve::{ResolveError, Resolver};
 use crate::store::{MachineStore, StoreError};
 use crate::thumbnails;
@@ -89,6 +89,7 @@ struct Entry {
 
 pub struct Machines {
     entries: Mutex<HashMap<MachineId, Entry>>,
+    jobs: Mutex<HashMap<JobId, Job>>,
     events: broadcast::Sender<Event>,
     ctx: Context,
 }
@@ -115,6 +116,7 @@ impl Machines {
         let (events, _) = broadcast::channel(256);
         let machines = Arc::new(Self {
             entries: Mutex::new(entries),
+            jobs: Mutex::new(HashMap::new()),
             events,
             ctx,
         });
@@ -318,21 +320,116 @@ impl Machines {
         Ok(())
     }
 
-    /// Grows an image no running machine is using.
-    pub async fn resize_image(&self, image: &ImageRef, size_gib: u32) -> Result<(), MachineError> {
+    /// Recent and running jobs, newest first.
+    pub fn jobs(&self) -> Vec<Job> {
+        let mut jobs: Vec<Job> = self.lock_jobs().values().cloned().collect();
+        jobs.sort_by_key(|job| std::cmp::Reverse(job.id));
+        jobs
+    }
+
+    /// Starts converting an image no running machine is using into a new image.
+    pub fn convert_image(
+        self: &Arc<Self>,
+        source: ImageRef,
+        request: ConvertImageRequest,
+    ) -> Result<Job, MachineError> {
+        self.require_not_running(&source, "converting")?;
+        self.ctx.images.resolve(&source)?;
+        let target = ImageRef {
+            group: source.group.clone(),
+            name: request.name,
+        };
+        self.ctx.images.path(&target)?;
+        images::check_conversion_target(&target, request.format)?;
+        let job = Job {
+            id: JobId::generate(),
+            description: format!("Converting {} to {}", source.name, target.name),
+            state: JobState::Running,
+            progress: 0.0,
+            error: None,
+        };
+        self.update_job(job.clone());
+
+        let machines = Arc::clone(self);
+        let id = job.id;
+        tokio::spawn(async move {
+            let reported = Mutex::new(0.0_f32);
+            let result = machines
+                .ctx
+                .images
+                .convert(&source, &target, request.format, |progress| {
+                    let mut last = reported.lock().unwrap_or_else(PoisonError::into_inner);
+                    // Every percent is plenty for a progress bar.
+                    if progress - *last >= 0.01 || (progress >= 1.0 && *last < 1.0) {
+                        *last = progress;
+                        machines.modify_job(id, |job| job.progress = progress);
+                    }
+                })
+                .await;
+            machines.modify_job(id, |job| match &result {
+                Ok(()) => {
+                    job.state = JobState::Succeeded;
+                    job.progress = 1.0;
+                }
+                Err(error) => {
+                    job.state = JobState::Failed;
+                    job.error = Some(error_chain(error));
+                }
+            });
+            match result {
+                Ok(()) => info!(
+                    source = source.name,
+                    target = target.name,
+                    "image converted"
+                ),
+                Err(error) => warn!(error = error_chain(&error), "image conversion failed"),
+            }
+        });
+        Ok(job)
+    }
+
+    fn update_job(&self, job: Job) {
+        self.lock_jobs().insert(job.id, job.clone());
+        self.emit(Event::JobUpdated { job });
+    }
+
+    fn modify_job(&self, id: JobId, change: impl FnOnce(&mut Job)) {
+        let job = {
+            let mut jobs = self.lock_jobs();
+            let Some(job) = jobs.get_mut(&id) else {
+                return;
+            };
+            change(job);
+            job.clone()
+        };
+        self.emit(Event::JobUpdated { job });
+    }
+
+    fn lock_jobs(&self) -> std::sync::MutexGuard<'_, HashMap<JobId, Job>> {
+        self.jobs.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn require_not_running(&self, image: &ImageRef, doing: &str) -> Result<(), MachineError> {
         let running: Vec<String> = self
             .image_users(image)
             .into_iter()
             .filter(|(_, _, state)| *state != MachineState::Stopped)
             .map(|(_, name, _)| name)
             .collect();
-        if !running.is_empty() {
-            return Err(MachineError::Conflict(format!(
-                "stop {} before resizing {}",
+        if running.is_empty() {
+            Ok(())
+        } else {
+            Err(MachineError::Conflict(format!(
+                "stop {} before {doing} {}",
                 running.join(", "),
                 image.name
-            )));
+            )))
         }
+    }
+
+    /// Grows an image no running machine is using.
+    pub async fn resize_image(&self, image: &ImageRef, size_gib: u32) -> Result<(), MachineError> {
+        self.require_not_running(image, "resizing")?;
         self.ctx.images.resize(image, size_gib).await?;
         Ok(())
     }

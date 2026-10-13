@@ -315,6 +315,65 @@
         }
       }
     },
+    "/api/v1/images/{group}/{name}/convert": {
+      "post": {
+        "tags": [
+          "images"
+        ],
+        "summary": "Starts converting an image into a new one in the same group, as a job.",
+        "operationId": "convertImage",
+        "parameters": [
+          {
+            "name": "group",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConvertImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Started; progress follows on the event stream",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Job"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A running machine uses it, or the target exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/images/{group}/{name}/resize": {
       "post": {
         "tags": [
@@ -369,6 +428,29 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "tags": [
+          "jobs"
+        ],
+        "operationId": "listJobs",
+        "responses": {
+          "200": {
+            "description": "Jobs since pmhvd started, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Job"
+                  }
                 }
               }
             }
@@ -738,6 +820,22 @@
           "graphical"
         ]
       },
+      "ConvertImageRequest": {
+        "type": "object",
+        "required": [
+          "format",
+          "name"
+        ],
+        "properties": {
+          "format": {
+            "$ref": "#/components/schemas/ImageFormat"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the new image, in the same group."
+          }
+        }
+      },
       "CreateImageRequest": {
         "type": "object",
         "description": "A new, empty qcow2 image.",
@@ -855,6 +953,24 @@
                 "type": "string",
                 "enum": [
                   "machine_removed"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "job",
+              "type"
+            ],
+            "properties": {
+              "job": {
+                "$ref": "#/components/schemas/Job"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "job_updated"
                 ]
               }
             }
@@ -998,6 +1114,47 @@
             "type": "string"
           }
         }
+      },
+      "Job": {
+        "type": "object",
+        "description": "Long-running work, such as converting an image. Progress arrives on the event stream.",
+        "required": [
+          "id",
+          "description",
+          "state",
+          "progress"
+        ],
+        "properties": {
+          "description": {
+            "type": "string",
+            "description": "What's being done, for display."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "number",
+            "format": "float",
+            "description": "From 0 to 1."
+          },
+          "state": {
+            "$ref": "#/components/schemas/JobState"
+          }
+        }
+      },
+      "JobState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "succeeded",
+          "failed"
+        ]
       },
       "LoginRequest": {
         "type": "object",

@@ -15,9 +15,10 @@ use futures_util::Stream;
 use futures_util::StreamExt;
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    ApiError, AuthStatus, CreateImageRequest, CreateMachineRequest, Event, HostInfo, ImageGroup,
-    ImageRef, LoginRequest, Machine, MachineId, MachineSpec, PowerRequest, Preferences,
-    ResizeImageRequest, SetPasswordRequest, TemporaryPassword, ThumbnailKind,
+    ApiError, AuthStatus, ConvertImageRequest, CreateImageRequest, CreateMachineRequest, Event,
+    HostInfo, ImageGroup, ImageRef, Job, LoginRequest, Machine, MachineId, MachineSpec,
+    PowerRequest, Preferences, ResizeImageRequest, SetPasswordRequest, TemporaryPassword,
+    ThumbnailKind,
 };
 use tokio::net::UnixStream;
 use tokio::sync::watch;
@@ -55,7 +56,9 @@ use crate::preferences::PreferencesStore;
         create_image,
         upload_image,
         delete_image,
-        resize_image
+        resize_image,
+        convert_image,
+        list_jobs
     ),
     components(schemas(ApiError, Event))
 )]
@@ -99,6 +102,8 @@ pub fn router(state: AppState) -> Router {
                 .layer(DefaultBodyLimit::disable()),
         )
         .route("/images/{group}/{name}/resize", post(resize_image))
+        .route("/images/{group}/{name}/convert", post(convert_image))
+        .route("/jobs", get(list_jobs))
         .route("/events", get(events));
     if state.local {
         v1 = v1.route("/auth/reset", post(reset_auth));
@@ -197,6 +202,8 @@ fn image_failure(error: &ImageError, message: String) -> ApiFailure {
         ImageError::InvalidName(_)
         | ImageError::UnknownFormat { .. }
         | ImageError::WouldShrink { .. }
+        | ImageError::WrongExtension { .. }
+        | ImageError::ConvertToIso
         | ImageError::ResizeIso => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_image"),
         ImageError::Upload(_) => (StatusCode::BAD_REQUEST, "upload_failed"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
@@ -527,6 +534,29 @@ async fn resize_image(
         .resize_image(&ImageRef { group, name }, request.size_gib)
         .await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Starts converting an image into a new one in the same group, as a job.
+#[utoipa::path(post, path = "/api/v1/images/{group}/{name}/convert", operation_id = "convertImage", tag = "images",
+    params(("group" = String, Path), ("name" = String, Path)),
+    request_body = ConvertImageRequest,
+    responses(
+        (status = 202, description = "Started; progress follows on the event stream", body = Job),
+        (status = 409, description = "A running machine uses it, or the target exists", body = ApiError),
+    ))]
+async fn convert_image(
+    State(AppState { machines, .. }): State<AppState>,
+    Path((group, name)): Path<(String, String)>,
+    Json(request): Json<ConvertImageRequest>,
+) -> ApiResult<(StatusCode, Json<Job>)> {
+    let job = machines.convert_image(ImageRef { group, name }, request)?;
+    Ok((StatusCode::ACCEPTED, Json(job)))
+}
+
+#[utoipa::path(get, path = "/api/v1/jobs", operation_id = "listJobs", tag = "jobs",
+    responses((status = 200, description = "Jobs since pmhvd started, newest first", body = [Job])))]
+async fn list_jobs(State(AppState { machines, .. }): State<AppState>) -> Json<Vec<Job>> {
+    Json(machines.jobs())
 }
 
 async fn serial_console(

@@ -241,9 +241,12 @@ Rough resource map:
 /api/v1/images                      GET POST (new blank image)
 /api/v1/images/{group}/{name}       GET (download, Range) PUT (upload) DELETE
 /api/v1/images/{group}/{name}/resize   POST
+/api/v1/images/{group}/{name}/convert  POST (starts a job)
+/api/v1/jobs                        GET
 /api/v1/host                        GET
 /api/v1/events                      SSE
-/api/v1/networks…, /api/v1/jobs/{id}   (later)
+/api/v1/preferences                 GET PUT
+/api/v1/networks…                   (later)
 ```
 
 The OpenAPI document (`pmhvd openapi`) is the authoritative list.

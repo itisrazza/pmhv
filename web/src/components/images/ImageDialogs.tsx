@@ -20,11 +20,12 @@ import {
 } from "@swopstar/react-ui";
 import {
   getListImagesQueryKey,
+  useConvertImage,
   useCreateImage,
   useDeleteImage,
   useResizeImage,
 } from "../../api/images/images";
-import type { ImageInfo } from "../../api/schemas";
+import type { ImageFormat, ImageInfo } from "../../api/schemas";
 import { ChoiceSelect } from "../form/ChoiceSelect";
 import { Field } from "../form/Field";
 
@@ -233,5 +234,93 @@ export function DeleteImageDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+function convertedName(name: string, format: ImageFormat): string {
+  const base = name.replace(/\.(qcow2|img|raw|iso)$/i, "");
+  return `${base}.${format === "qcow2" ? "qcow2" : "img"}`;
+}
+
+export function ConvertImageDialog({
+  open,
+  onOpenChange,
+  image,
+}: DialogProps & { image: ImageInfo }) {
+  const initialFormat: ImageFormat = image.format === "qcow2" ? "raw" : "qcow2";
+  const [format, setFormat] = useState<ImageFormat>(initialFormat);
+  const [name, setName] = useState(convertedName(image.name, initialFormat));
+  const convert = useConvertImage({
+    mutation: {
+      // Progress and the result arrive as toasts from the event stream.
+      onSuccess: () => onOpenChange(false),
+      onError: (error) => toast.error(error.message),
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Convert {image.name}</DialogTitle>
+        </DialogHeader>
+        <form
+          id="convert-image"
+          className="flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            convert.mutate({
+              group: image.group,
+              name: image.name,
+              data: { format, name },
+            });
+          }}
+        >
+          <Field
+            id="convert-format"
+            label="Format"
+            hint="Apple Virtualization needs raw images; QEMU works best with qcow2."
+          >
+            <ChoiceSelect<ImageFormat>
+              id="convert-format"
+              value={format}
+              choices={[
+                { value: "qcow2", label: "qcow2 (thin, QEMU)" },
+                { value: "raw", label: "Raw (Apple Virtualization)" },
+              ]}
+              onChange={(next) => {
+                setFormat(next);
+                setName(convertedName(name, next));
+              }}
+            />
+          </Field>
+          <Field
+            id="convert-name"
+            label="New image name"
+            hint="The original is kept."
+          >
+            <Input
+              id="convert-name"
+              required
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </Field>
+        </form>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            form="convert-image"
+            variant="primary"
+            disabled={convert.isPending}
+          >
+            Convert
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

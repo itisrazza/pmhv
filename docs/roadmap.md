@@ -10,7 +10,7 @@ Milestones marked *(done)* or *(in progress)*; see [Status](#status) for what's 
 2. *(done)* **QEMU on macOS and Linux, headless.** Machine spec, create/start/stop/pause via shim, serial console in the browser, daemon restart without killing VMs.
 3. *(done)* **Graphical console and thumbnails** for QEMU. Console tab with keyboard/mouse toolbar, virtual keyboard and mouse. TPM via `swtpm`, so Windows 11 guests work. The Machines grid, detail page and basic create dialog. Tests start here (see [development.md](development.md#testing)).
 4. *(in progress)* **Auth.** Single-user sign-in with password and/or passkey, temporary first-launch password, sessions, log out, CLI reset. Needed before pmhv is left running for long.
-5. *(in progress)* **Disk images.** Storage groups, upload/download, create blank, convert, resize.
+5. *(done)* **Disk images.** Storage groups, upload/download, create blank, convert, resize.
 6. *(in progress)* **Virtualization.framework backend.** macOS guests from IPSW, guest-VNC and serial consoles. Linux guests on VZ as an opt-in.
 
 ## After the MVP
@@ -36,7 +36,7 @@ Not scheduled yet:
 What's left in the milestones marked in progress, and what's done but untested:
 
 - **Auth:** passkeys (see [Security](design.md#security)). Password sign-in, the temporary first-launch password, setup and `pmhv auth reset` are done.
-- **Disk images:** converting between formats, which needs the background jobs from the API design. Upload, download, new blank images, resize and delete are done.
+
 - **Virtualization.framework:** macOS guests (IPSW install and boot) and the guest-VNC graphical console. Linux and other EFI guests with a text console are done, verified only as far as Apple's EFI firmware with a blank disk.
 - **TPM:** the swtpm integration is written but hasn't been run, because swtpm wasn't installed on the development machine (`brew install swtpm`).
 - **Guests:** booted so far: EDK2's UEFI shell, on text and graphical consoles. No real OS install has been tried yet.

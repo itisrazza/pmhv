@@ -5,6 +5,7 @@ mod error;
 mod event;
 mod host;
 mod image;
+mod job;
 pub mod machine;
 pub mod paths;
 mod preferences;
@@ -17,6 +18,7 @@ pub use host::HostInfo;
 pub use image::{
     CreateImageRequest, ImageFormat, ImageGroup, ImageInfo, ImageUser, ResizeImageRequest,
 };
+pub use job::{ConvertImageRequest, Job, JobId, JobState};
 pub use machine::{
     Arch, Backend, ConsoleKind, CreateMachineRequest, DiskBus, DiskMedia, DiskSpec, Firmware,
     GuestOs, ImageRef, Machine, MachineId, MachineSpec, MachineState, NetworkSpec, NewDisk,
