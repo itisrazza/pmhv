@@ -45,7 +45,8 @@ export function defaultsFor(guestOs: GuestOs) {
   return {
     memoryGib: memoryGib[guestOs],
     newDiskGib: diskGib[guestOs],
-    console: (guestOs === "linux" ? "text" : "graphical") as ConsoleKind,
+    // Graphical everywhere: installers rarely use the serial console without boot arguments.
+    console: "graphical" as ConsoleKind,
     tpm: guestOs === "windows",
   };
 }
