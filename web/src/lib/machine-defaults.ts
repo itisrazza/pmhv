@@ -1,5 +1,6 @@
 import type {
   Arch,
+  Backend,
   ConsoleKind,
   CreateMachineRequest,
   DiskBus,
@@ -11,6 +12,7 @@ import type {
 export interface MachineDraft {
   name: string;
   guestOs: GuestOs;
+  backend: Backend;
   arch: Arch;
   bios: boolean;
   cpuCores: number;
@@ -52,6 +54,7 @@ export function initialDraft(hostArch: Arch): MachineDraft {
   return {
     name: "",
     guestOs: "linux",
+    backend: "qemu",
     arch: hostArch,
     bios: false,
     cpuCores: 2,
@@ -68,9 +71,18 @@ function bootBus(draft: MachineDraft): DiskBus {
   return draft.bios ? "sata" : "virtio";
 }
 
-/** CD-ROMs go on VirtIO-SCSI for ARM (EDK2 supports it there) and SATA for x86. */
-function mediaBus(arch: Arch): DiskBus {
-  return arch === "aarch64" ? "virtio" : "sata";
+/**
+ * CD-ROMs go on USB for Apple Virtualization (its only removable-media path), VirtIO-SCSI for
+ * ARM under QEMU (EDK2 supports it there) and SATA for x86.
+ */
+function mediaBus(draft: MachineDraft): DiskBus {
+  if (draft.backend === "vz") return "usb";
+  return draft.arch === "aarch64" ? "virtio" : "sata";
+}
+
+/** Apple Virtualization runs Linux and other EFI guests on a text console, natively. */
+export function supportsVz(guestOs: GuestOs): boolean {
+  return guestOs === "linux" || guestOs === "other";
 }
 
 /** Images are referred to as `group/name` in the dialog's selects. */
@@ -91,7 +103,7 @@ export function toRequest(draft: MachineDraft): CreateMachineRequest {
   if (draft.installMedia) {
     disks.push({
       image: imageRef(draft.installMedia),
-      bus: mediaBus(draft.arch),
+      bus: mediaBus(draft),
       media: "cdrom",
     });
   }
@@ -99,8 +111,7 @@ export function toRequest(draft: MachineDraft): CreateMachineRequest {
     spec: {
       name: draft.name.trim(),
       guest_os: draft.guestOs,
-      // The Virtualization.framework backend (for macOS guests) isn't implemented yet.
-      backend: "qemu",
+      backend: draft.backend,
       arch: draft.arch,
       firmware: draft.bios ? "bios" : "uefi",
       cpu_cores: draft.cpuCores,

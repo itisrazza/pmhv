@@ -165,14 +165,18 @@ impl ImageStore {
         Ok((metadata.blocks() * 512, metadata.len()))
     }
 
-    /// Creates an empty qcow2 image.
+    /// Creates an empty image: thin qcow2 for `.qcow2` names, sparse raw for `.img`/`.raw`.
     pub async fn create_blank(&self, image: &ImageRef, size_gib: u32) -> Result<(), ImageError> {
         let path = self.path(image)?;
-        if format_of(&image.name) != Some(ImageFormat::Qcow2) {
-            return Err(ImageError::UnknownFormat {
-                name: image.name.clone(),
-            });
-        }
+        let format = match format_of(&image.name) {
+            Some(ImageFormat::Qcow2) => "qcow2",
+            Some(ImageFormat::Raw) => "raw",
+            Some(ImageFormat::Iso) | None => {
+                return Err(ImageError::UnknownFormat {
+                    name: image.name.clone(),
+                });
+            }
+        };
         if path.exists() {
             return Err(ImageError::AlreadyExists {
                 group: image.group.clone(),
@@ -188,7 +192,7 @@ impl ImageStore {
         let size = format!("{size_gib}G");
         let mut command = Command::new(&self.qemu_img);
         command
-            .args(["create", "-q", "-f", "qcow2"])
+            .args(["create", "-q", "-f", format])
             .arg(&path)
             .arg(size);
         self.run(command).await.map(|_| ())

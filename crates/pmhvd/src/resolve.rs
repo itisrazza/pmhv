@@ -6,13 +6,17 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 use pmhv_driver::{Launch, LaunchFile, MachineRuntimeDir};
-use pmhv_model::{Arch, Backend, ConsoleKind, Firmware, ImageFormat, MachineId, MachineSpec};
+use pmhv_model::{
+    Arch, Backend, ConsoleKind, DiskBus, DiskMedia, Firmware, GuestOs, ImageFormat, MachineId,
+    MachineSpec, NetworkSpec,
+};
 use pmhv_qemu::firmware::{self, FirmwareError};
 use pmhv_qemu::host::{self, HostError};
 use pmhv_qemu::launch::machine_type;
 use pmhv_qemu::{
     DiskFormat, LaunchDisk, LaunchFirmware, QemuLaunch, Sockets, SpecError, TpmLaunch,
 };
+use pmhv_vz::{VzBoot, VzDisk, VzDiskKind, VzLaunch};
 
 use crate::config::QemuConfig;
 use crate::images::{ImageError, ImageStore};
@@ -22,8 +26,8 @@ use crate::store::MachineStore;
 pub enum ResolveError {
     #[error(transparent)]
     Spec(#[from] SpecError),
-    #[error("the Virtualization.framework backend isn't implemented yet; use QEMU")]
-    VzUnsupported,
+    #[error(transparent)]
+    Vz(#[from] VzSpecError),
     #[error("pmhv can't run guests on a {0} host")]
     UnsupportedHost(&'static str),
     #[error(transparent)]
@@ -49,10 +53,10 @@ pub struct Resolver<'a> {
 impl Resolver<'_> {
     /// Checks a spec without touching the host's QEMU install, for create and update.
     pub fn check(&self, spec: &MachineSpec) -> Result<(), ResolveError> {
-        if spec.backend == Backend::Vz {
-            return Err(ResolveError::VzUnsupported);
+        match spec.backend {
+            Backend::Qemu => pmhv_qemu::launch::validate(spec)?,
+            Backend::Vz => Self::check_vz(spec)?,
         }
-        pmhv_qemu::launch::validate(spec)?;
         for (index, disk) in spec.disks.iter().enumerate() {
             self.images
                 .resolve(&disk.image)
@@ -68,6 +72,12 @@ impl Resolver<'_> {
         dir: &MachineRuntimeDir,
     ) -> Result<LaunchFile, ResolveError> {
         self.check(spec)?;
+        if spec.backend == Backend::Vz {
+            return Ok(LaunchFile {
+                machine_id: id,
+                launch: Launch::Vz(self.vz_launch(id, spec)?),
+            });
+        }
         let host_arch =
             Arch::host().ok_or(ResolveError::UnsupportedHost(std::env::consts::ARCH))?;
         let binary = host::find_system_binary(spec.arch, self.qemu.bin_dir.as_deref())?;
@@ -162,5 +172,206 @@ impl Resolver<'_> {
             code: found.code,
             vars,
         })
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum VzSpecError {
+    #[error("Apple Virtualization is only available on macOS")]
+    NotMacos,
+    #[error("installing macOS guests from an IPSW isn't implemented yet")]
+    MacosGuest,
+    #[error(
+        "graphical consoles on Apple Virtualization need a VNC server in the guest, which isn't wired up yet; use a text console"
+    )]
+    Graphical,
+    #[error("Apple Virtualization has no TPM")]
+    Tpm,
+    #[error("Apple Virtualization only boots UEFI")]
+    Bios,
+    #[error("Apple Virtualization can't emulate other architectures; use QEMU for {0} guests")]
+    Emulated(&'static str),
+    #[error("machine name can't be empty")]
+    EmptyName,
+    #[error("a machine needs at least one CPU core")]
+    NoCores,
+    #[error("Apple Virtualization needs at least 128 MiB of memory")]
+    TooLittleMemory,
+    #[error("disk {index} is qcow2, which Apple Virtualization can't read; use a raw .img image")]
+    Qcow2 { index: usize },
+    #[error("disk {index}: Apple Virtualization has no SATA; use VirtIO, NVMe or USB")]
+    Sata { index: usize },
+    #[error("disk {index}: NVMe can't hold CD-ROM media; use USB or VirtIO")]
+    NvmeCdrom { index: usize },
+}
+
+impl Resolver<'_> {
+    fn check_vz(spec: &MachineSpec) -> Result<(), VzSpecError> {
+        if !cfg!(target_os = "macos") {
+            return Err(VzSpecError::NotMacos);
+        }
+        if spec.guest_os == GuestOs::Macos {
+            return Err(VzSpecError::MacosGuest);
+        }
+        if spec.console == ConsoleKind::Graphical {
+            return Err(VzSpecError::Graphical);
+        }
+        if spec.tpm {
+            return Err(VzSpecError::Tpm);
+        }
+        if spec.firmware == Firmware::Bios {
+            return Err(VzSpecError::Bios);
+        }
+        if Arch::host() != Some(spec.arch) {
+            return Err(VzSpecError::Emulated(spec.arch.as_str()));
+        }
+        if spec.name.trim().is_empty() {
+            return Err(VzSpecError::EmptyName);
+        }
+        if spec.cpu_cores == 0 {
+            return Err(VzSpecError::NoCores);
+        }
+        if spec.memory_mib < 128 {
+            return Err(VzSpecError::TooLittleMemory);
+        }
+        for (index, disk) in spec.disks.iter().enumerate() {
+            if crate::images::format_of(&disk.image.name) == Some(ImageFormat::Qcow2) {
+                return Err(VzSpecError::Qcow2 { index });
+            }
+            match (disk.bus, disk.media) {
+                (DiskBus::Sata, _) => return Err(VzSpecError::Sata { index }),
+                (DiskBus::Nvme, DiskMedia::Cdrom) => return Err(VzSpecError::NvmeCdrom { index }),
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn vz_launch(&self, id: MachineId, spec: &MachineSpec) -> Result<VzLaunch, ResolveError> {
+        let disks = spec
+            .disks
+            .iter()
+            .enumerate()
+            .map(|(index, disk)| {
+                let (path, _) = self
+                    .images
+                    .resolve(&disk.image)
+                    .map_err(|source| ResolveError::Disk { index, source })?;
+                let kind = match disk.bus {
+                    DiskBus::Virtio => VzDiskKind::Virtio,
+                    DiskBus::Nvme => VzDiskKind::Nvme,
+                    DiskBus::Usb => VzDiskKind::Usb,
+                    DiskBus::Sata => return Err(VzSpecError::Sata { index }.into()),
+                };
+                Ok(VzDisk {
+                    path,
+                    kind,
+                    read_only: disk.read_only || disk.media == DiskMedia::Cdrom,
+                })
+            })
+            .collect::<Result<_, ResolveError>>()?;
+        Ok(VzLaunch {
+            name: spec.name.clone(),
+            cpu_cores: spec.cpu_cores,
+            memory_mib: spec.memory_mib,
+            boot: VzBoot::Efi {
+                variable_store: self.store.machine_dir(id).join("efi-vars.fd"),
+            },
+            disks,
+            nat: spec.network == NetworkSpec::Nat,
+        })
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use pmhv_model::{DiskSpec, ImageRef};
+
+    use super::*;
+
+    fn spec() -> MachineSpec {
+        MachineSpec {
+            name: "vz".to_owned(),
+            guest_os: GuestOs::Linux,
+            backend: Backend::Vz,
+            arch: Arch::host().expect("supported host"),
+            firmware: Firmware::Uefi,
+            cpu_cores: 2,
+            memory_mib: 1024,
+            disks: Vec::new(),
+            network: NetworkSpec::Nat,
+            console: ConsoleKind::Text,
+            tpm: false,
+            notes: String::new(),
+        }
+    }
+
+    fn disk(name: &str, bus: DiskBus, media: DiskMedia) -> DiskSpec {
+        DiskSpec {
+            image: ImageRef {
+                group: "default".to_owned(),
+                name: name.to_owned(),
+            },
+            bus,
+            media,
+            read_only: false,
+        }
+    }
+
+    #[test]
+    fn checks_vz_specs() {
+        type Case = (&'static str, fn(&mut MachineSpec), Option<&'static str>);
+        let cases: [Case; 9] = [
+            ("valid", |_| {}, None),
+            (
+                "macOS guest",
+                |spec| spec.guest_os = GuestOs::Macos,
+                Some("IPSW"),
+            ),
+            (
+                "graphical",
+                |spec| spec.console = ConsoleKind::Graphical,
+                Some("VNC"),
+            ),
+            ("TPM", |spec| spec.tpm = true, Some("TPM")),
+            ("BIOS", |spec| spec.firmware = Firmware::Bios, Some("UEFI")),
+            (
+                "qcow2 disk",
+                |spec| spec.disks = vec![disk("a.qcow2", DiskBus::Virtio, DiskMedia::Disk)],
+                Some("qcow2"),
+            ),
+            (
+                "SATA disk",
+                |spec| spec.disks = vec![disk("a.img", DiskBus::Sata, DiskMedia::Disk)],
+                Some("SATA"),
+            ),
+            (
+                "NVMe CD-ROM",
+                |spec| spec.disks = vec![disk("a.iso", DiskBus::Nvme, DiskMedia::Cdrom)],
+                Some("NVMe"),
+            ),
+            (
+                "raw disk and USB installer",
+                |spec| {
+                    spec.disks = vec![
+                        disk("a.img", DiskBus::Virtio, DiskMedia::Disk),
+                        disk("b.iso", DiskBus::Usb, DiskMedia::Cdrom),
+                    ];
+                },
+                None,
+            ),
+        ];
+        for (name, change, expected) in cases {
+            let mut spec = spec();
+            change(&mut spec);
+            let result = Resolver::check_vz(&spec);
+            match expected {
+                None => assert!(result.is_ok(), "{name}: {result:?}"),
+                Some(fragment) => {
+                    let message = result.expect_err(name).to_string();
+                    assert!(message.contains(fragment), "{name}: {message}");
+                }
+            }
+        }
     }
 }

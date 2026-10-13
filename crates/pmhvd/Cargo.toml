@@ -19,6 +19,7 @@ futures-util = "0.3.34"
 pmhv-driver = { version = "0.1.0", path = "../pmhv-driver" }
 pmhv-model = { version = "0.1.0", path = "../pmhv-model" }
 pmhv-qemu = { version = "0.1.0", path = "../pmhv-qemu" }
+pmhv-vz = { version = "0.1.0", path = "../pmhv-vz" }
 rand = "0.10.3"
 rust-embed = { version = "8.13.0", features = ["mime-guess"] }
 serde = { version = "1.0.229", features = ["derive"] }

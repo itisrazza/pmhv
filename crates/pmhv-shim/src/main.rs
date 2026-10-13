@@ -8,6 +8,8 @@ compile_error!("pmhv-shim only supports unix hosts for now; Windows support is p
 mod console;
 mod control;
 mod machine;
+#[cfg(target_os = "macos")]
+mod vz;
 
 use std::io;
 use std::os::unix::fs::PermissionsExt;
@@ -43,10 +45,11 @@ enum ShimError {
     NoRuntimeDir(PathBuf),
     #[error("failed to listen on {path}")]
     Bind { path: PathBuf, source: io::Error },
+    #[error("failed to start the async runtime")]
+    Runtime(#[source] io::Error),
 }
 
-#[tokio::main]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_ansi(false)
@@ -55,16 +58,49 @@ async fn main() -> ExitCode {
         )
         .init();
 
-    match run().await {
+    let started = prepare().and_then(|prepared| {
+        let runtime = tokio::runtime::Runtime::new().map_err(ShimError::Runtime)?;
+        Ok((prepared, runtime))
+    });
+    let (prepared, runtime) = match started {
+        Ok(started) => started,
+        Err(error) => return failed(&error),
+    };
+
+    // Virtualization.framework machines live on the main queue, so the main thread has to run
+    // it; everything else moves to a worker thread.
+    #[cfg(target_os = "macos")]
+    if matches!(prepared.launch, Launch::Vz(_)) {
+        std::thread::spawn(move || {
+            let code = match runtime.block_on(run(prepared)) {
+                Ok(()) => 0,
+                Err(error) => {
+                    failed(&error);
+                    1
+                }
+            };
+            std::process::exit(code);
+        });
+        pmhv_vz::run_main_queue();
+    }
+
+    match runtime.block_on(run(prepared)) {
         Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            error!(error = error_chain(&error), "shim failed");
-            ExitCode::FAILURE
-        }
+        Err(error) => failed(&error),
     }
 }
 
-async fn run() -> Result<(), ShimError> {
+fn failed(error: &ShimError) -> ExitCode {
+    error!(error = error_chain(error), "shim failed");
+    ExitCode::FAILURE
+}
+
+struct Prepared {
+    launch: Launch,
+    dir: MachineRuntimeDir,
+}
+
+fn prepare() -> Result<Prepared, ShimError> {
     let launch_path = std::env::args_os()
         .nth(1)
         .map(PathBuf::from)
@@ -76,10 +112,19 @@ async fn run() -> Result<(), ShimError> {
             .ok_or_else(|| ShimError::NoRuntimeDir(launch_path.clone()))?
             .to_owned(),
     );
-    let Launch::Qemu(launch) = launch_file.launch;
     info!(machine = %launch_file.machine_id, "shim starting");
+    Ok(Prepared {
+        launch: launch_file.launch,
+        dir,
+    })
+}
 
-    let machine = Machine::new(launch.graphical);
+async fn run(Prepared { launch, dir }: Prepared) -> Result<(), ShimError> {
+    let graphical = match &launch {
+        Launch::Qemu(qemu) => qemu.graphical,
+        Launch::Vz(_) => false,
+    };
+    let machine = Machine::new(graphical);
     let (control, console) = match bind(&dir.shim_socket())
         .and_then(|control| Ok((control, bind(&dir.console_socket())?)))
     {

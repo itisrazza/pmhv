@@ -14,8 +14,8 @@ use pmhv_driver::{
 };
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    Arch, ConsoleKind, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageGroup, ImageRef,
-    ImageUser, Machine, MachineId, MachineSpec, MachineState, PowerAction, Thumbnail,
+    Arch, Backend, ConsoleKind, CreateMachineRequest, DiskMedia, DiskSpec, Event, ImageGroup,
+    ImageRef, ImageUser, Machine, MachineId, MachineSpec, MachineState, PowerAction, Thumbnail,
     ThumbnailKind,
 };
 use tokio::io::BufReader;
@@ -153,7 +153,16 @@ impl Machines {
         if let Some(disk) = request.new_boot_disk {
             let image = ImageRef {
                 group: DEFAULT_GROUP.to_owned(),
-                name: format!("{} - Disk 0.qcow2", spec.name.replace(['/', '\\'], "-")),
+                // Virtualization.framework can't read qcow2.
+                name: format!(
+                    "{} - Disk 0.{}",
+                    spec.name.replace(['/', '\\'], "-"),
+                    if spec.backend == Backend::Vz {
+                        "img"
+                    } else {
+                        "qcow2"
+                    }
+                ),
             };
             self.ctx.images.create_blank(&image, disk.size_gib).await?;
             spec.disks.insert(
@@ -455,13 +464,19 @@ impl Machines {
         };
         let status = final_status
             .or_else(|| read_exit_file(&dir))
-            .unwrap_or_else(|| ShimStatus {
-                state: MachineState::Stopped,
-                error: Some(format!(
-                    "pmhv-shim exited unexpectedly; see {}",
-                    self.ctx.store.shim_log(id).display()
-                )),
-                exited: true,
+            .unwrap_or_else(|| {
+                let log = self.ctx.store.shim_log(id);
+                let last_line = last_log_line(&log)
+                    .map(|line| format!(": {line}"))
+                    .unwrap_or_default();
+                ShimStatus {
+                    state: MachineState::Stopped,
+                    error: Some(format!(
+                        "pmhv-shim exited unexpectedly{last_line} (log: {})",
+                        log.display()
+                    )),
+                    exited: true,
+                }
             });
         self.set_status(id, MachineState::Stopped, status.error);
         remove_runtime_dir(&dir);
@@ -762,6 +777,15 @@ fn remove_runtime_dir(dir: &MachineRuntimeDir) {
             warn!(path = %dir.path().display(), %error, "failed to remove runtime directory");
         }
     }
+}
+
+/// The last line of a log, for error messages; the whole log is a click away.
+fn last_log_line(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    text.lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(str::to_owned)
 }
 
 fn read_exit_file(dir: &MachineRuntimeDir) -> Option<ShimStatus> {

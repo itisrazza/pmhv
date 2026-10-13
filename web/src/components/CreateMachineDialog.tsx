@@ -27,6 +27,7 @@ import { archLabels, consoleLabels, formatBytes } from "../lib/labels";
 import {
   defaultsFor,
   initialDraft,
+  supportsVz,
   toRequest,
   type MachineDraft,
 } from "../lib/machine-defaults";
@@ -88,11 +89,13 @@ export function CreateMachineDialog({
     return null;
   }
   const hostArch: Arch = host.data.arch === "x86_64" ? "x86_64" : "aarch64";
+  const vzAvailable = host.data.os === "macos";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open && (
         <CreateMachineForm
           hostArch={hostArch}
+          vzAvailable={vzAvailable}
           onDone={() => onOpenChange(false)}
         />
       )}
@@ -102,9 +105,11 @@ export function CreateMachineDialog({
 
 function CreateMachineForm({
   hostArch,
+  vzAvailable,
   onDone,
 }: {
   hostArch: Arch;
+  vzAvailable: boolean;
   onDone: () => void;
 }) {
   const [draft, setDraft] = useState<MachineDraft>(() =>
@@ -126,7 +131,20 @@ function CreateMachineForm({
   });
 
   const update = (changes: Partial<MachineDraft>) =>
-    setDraft((current) => ({ ...current, ...changes }));
+    setDraft((current) => {
+      const next = { ...current, ...changes };
+      // Apple Virtualization: native architecture, UEFI, text console, no TPM.
+      return next.backend === "vz"
+        ? {
+            ...next,
+            arch: hostArch,
+            bios: false,
+            console: "text",
+            tpm: false,
+          }
+        : next;
+    });
+  const vz = draft.backend === "vz";
   const allImages = images.data?.flatMap((group) => group.images) ?? [];
   const diskChoices = imageChoices(
     allImages,
@@ -171,13 +189,18 @@ function CreateMachineForm({
               value={draft.guestOs}
               choices={guestOsChoices}
               onChange={(guestOs) =>
-                update({ guestOs, ...defaultsFor(guestOs) })
+                update({
+                  guestOs,
+                  ...defaultsFor(guestOs),
+                  backend: supportsVz(guestOs) ? draft.backend : "qemu",
+                })
               }
             />
           </Field>
           <Field id="arch" label="Architecture">
             <ChoiceSelect
               id="arch"
+              disabled={vz}
               value={draft.arch}
               choices={archChoices(hostArch)}
               onChange={(arch) =>
@@ -186,6 +209,32 @@ function CreateMachineForm({
             />
           </Field>
         </div>
+
+        {vzAvailable && (
+          <Field
+            id="backend"
+            label="Hypervisor"
+            hint={
+              vz
+                ? "Text console only for now, and disks must be raw .img images."
+                : undefined
+            }
+          >
+            <ChoiceSelect
+              id="backend"
+              value={draft.backend}
+              choices={[
+                { value: "qemu", label: "QEMU (recommended)" },
+                {
+                  value: "vz",
+                  label: "Apple Virtualization",
+                  disabled: !supportsVz(draft.guestOs),
+                },
+              ]}
+              onChange={(backend) => update({ backend })}
+            />
+          </Field>
+        )}
 
         <div className="grid grid-cols-2 gap-4">
           <Field id="cores" label="CPU cores">
@@ -277,6 +326,7 @@ function CreateMachineForm({
         <Field id="console" label="Console">
           <ChoiceSelect
             id="console"
+            disabled={vz}
             value={draft.console}
             choices={consoleChoices}
             onChange={(console) => update({ console })}
@@ -284,13 +334,15 @@ function CreateMachineForm({
         </Field>
 
         <div className="flex flex-col gap-2">
-          <CheckboxField
-            id="tpm"
-            label="TPM 2.0 (needed by Windows 11)"
-            checked={draft.tpm}
-            onChange={(tpm) => update({ tpm })}
-          />
-          {draft.arch === "x86_64" && (
+          {!vz && (
+            <CheckboxField
+              id="tpm"
+              label="TPM 2.0 (needed by Windows 11)"
+              checked={draft.tpm}
+              onChange={(tpm) => update({ tpm })}
+            />
+          )}
+          {!vz && draft.arch === "x86_64" && (
             <CheckboxField
               id="bios"
               label="Legacy BIOS instead of UEFI"

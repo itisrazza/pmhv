@@ -7,7 +7,7 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use pmhv_driver::{MachineRuntimeDir, ShimPower, ShimStatus};
+use pmhv_driver::{Launch, MachineRuntimeDir, ShimPower, ShimStatus};
 use pmhv_model::MachineState;
 use pmhv_qemu::{QemuLaunch, Qmp, QmpError, TpmLaunch};
 use serde_json::json;
@@ -41,12 +41,33 @@ pub enum RunError {
     Wait(#[source] io::Error),
     #[error("QMP command failed")]
     Qmp(#[from] QmpError),
+    #[cfg(not(target_os = "macos"))]
+    #[error("Apple Virtualization is only available on macOS")]
+    VzUnavailable,
+    #[cfg(target_os = "macos")]
+    #[error("failed to create the serial console")]
+    SerialPair(#[source] io::Error),
+    #[cfg(target_os = "macos")]
+    #[error(transparent)]
+    Vz(#[from] pmhv_vz::VzError),
+    #[cfg(target_os = "macos")]
+    #[error("a Virtualization.framework call panicked")]
+    VzPanicked,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ControlError {
     #[error("the machine isn't running yet")]
     NotReady,
+    #[cfg(target_os = "macos")]
+    #[error("Apple Virtualization can't reset a machine; stop and start it instead")]
+    VzReset,
+    #[cfg(target_os = "macos")]
+    #[error(transparent)]
+    Vz(#[from] pmhv_vz::VzError),
+    #[cfg(target_os = "macos")]
+    #[error("a Virtualization.framework call panicked")]
+    VzPanicked,
     #[error("the machine isn't graphical, so there's no screen to capture")]
     NotGraphical,
     #[error(transparent)]
@@ -67,6 +88,8 @@ pub struct Machine {
     graphical: bool,
     qmp: OnceCell<Qmp>,
     kill: Notify,
+    #[cfg(target_os = "macos")]
+    pub(crate) vz: OnceCell<pmhv_vz::Vz>,
 }
 
 impl Machine {
@@ -82,14 +105,20 @@ impl Machine {
             graphical,
             qmp: OnceCell::new(),
             kill: Notify::new(),
+            #[cfg(target_os = "macos")]
+            vz: OnceCell::new(),
         })
     }
 
-    fn set_state(&self, state: MachineState) {
+    pub(crate) fn set_state(&self, state: MachineState) {
         self.status.send_modify(|status| status.state = state);
     }
 
     pub async fn power(&self, action: ShimPower) -> Result<(), ControlError> {
+        #[cfg(target_os = "macos")]
+        if let Some(vz) = self.vz.get() {
+            return crate::vz::power(*vz, action).await;
+        }
         let Some(qmp) = self.qmp.get() else {
             if action == ShimPower::ForceStop {
                 self.kill.notify_one();
@@ -121,8 +150,22 @@ impl Machine {
         Ok(())
     }
 
-    /// Runs QEMU until it exits. `Ok` carries the error to report if it exited abnormally.
+    /// Runs the machine until it stops. `Ok` carries the error to report if it stopped abnormally.
     pub async fn run(
+        &self,
+        launch: &Launch,
+        dir: &MachineRuntimeDir,
+    ) -> Result<Option<String>, RunError> {
+        match launch {
+            Launch::Qemu(qemu) => self.run_qemu(qemu, dir).await,
+            #[cfg(target_os = "macos")]
+            Launch::Vz(vz) => self.run_vz(vz).await,
+            #[cfg(not(target_os = "macos"))]
+            Launch::Vz(_) => Err(RunError::VzUnavailable),
+        }
+    }
+
+    async fn run_qemu(
         &self,
         launch: &QemuLaunch,
         dir: &MachineRuntimeDir,

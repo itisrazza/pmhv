@@ -11,6 +11,7 @@ pub use runtime::MachineRuntimeDir;
 
 use pmhv_model::MachineId;
 use pmhv_qemu::QemuLaunch;
+use pmhv_vz::VzLaunch;
 use serde::{Deserialize, Serialize};
 
 /// Written by pmhvd as `launch.json` in the machine's runtime directory; read by the shim.
@@ -24,4 +25,5 @@ pub struct LaunchFile {
 #[serde(tag = "backend", rename_all = "snake_case")]
 pub enum Launch {
     Qemu(QemuLaunch),
+    Vz(VzLaunch),
 }
