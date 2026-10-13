@@ -143,7 +143,12 @@ Unix socket paths are limited to 104 bytes on macOS, and `$TMPDIR` there is alre
 
 ### Virtualization.framework (macOS)
 
-- Bound from Rust with the `objc2` family of crates (there are generated `objc2-virtualization` bindings). **[verify]** binding coverage for the APIs we need.
+- Bound from Rust with `objc2-virtualization` (generated bindings, with `dispatch2` and `block2` for queues and completion handlers), in the `pmhv-vz` crate. It's the only crate allowed `unsafe`.
+- Virtualization objects aren't thread-safe and belong to the dispatch queue they were created for. pmhv uses the main queue: for VZ machines the shim runs `dispatch_main()` on its main thread and tokio on worker threads, which send work to the main queue and wait for the answer. (`dispatch_main()` exits the main thread and GCD then drains the main queue from worker threads, so per-thread state can't be used there.)
+- The framework reports state only when asked, so the shim polls it twice a second.
+- Disks must be raw: VZ can't read qcow2. VirtIO and NVMe for disks, USB mass storage for install media; there's no SATA. Boot disks created for VZ machines are sparse raw `.img` files.
+- No reset: Apple Virtualization can only stop and start a machine.
+- Implemented: Linux and other EFI guests with a text console (Apple's EFI boot loader, a VirtIO console, NAT, entropy). Still to do: macOS guests (installing from an IPSW, then `VZMacOSBootLoader` with the platform's hardware model and machine identifier), the guest-VNC graphical console, and Rosetta.
 - The shim binary must be code-signed with `com.apple.security.virtualization`. Ad-hoc signing works for local development; a `just` recipe handles it. Bridged networking needs `com.apple.vm.networking`, which Apple only grants on request — plan around not having it.
 - Guests: mainly macOS (Apple silicon only, installed from an IPSW, limited to two concurrent macOS VMs by the licence/kernel). Linux guests run on QEMU by default; VZ supports them (ARM64, EFI boot), but it's opt-in, e.g. for Rosetta. Windows ARM isn't a realistic VZ guest (no TPM), so it runs on QEMU.
 

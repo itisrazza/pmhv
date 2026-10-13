@@ -106,13 +106,16 @@ All orchestration goes through [`just`](https://github.com/casey/just):
 | `just check` | Type checks: `cargo check` and `tsc` |
 | `just test` | Unit tests |
 | `just test-integration` | Boots UEFI firmware under QEMU through `pmhvd`, the shim and the CLI, restarting `pmhvd` mid-run |
+| `just sign` | Signs `pmhv-shim` with the Virtualization.framework entitlement (macOS) |
 | `just licences` | REUSE check on tracked files |
 
 Before calling a change done: `just fmt lint check build`. CI runs the same on macOS and Linux, and also fails if `just generate` would change anything, so run it after touching API types.
 
 Debug builds of `pmhvd` read `web/dist` from disk at runtime, so `just build-web` is enough to pick up UI changes without rebuilding Rust. Release builds compile the UI in. Without a built UI, `pmhvd` still runs and answers UI requests with a 503 explaining what to build.
 
-A `just sign` recipe, for the Virtualization.framework entitlement, arrives with that backend.
+On macOS, `pmhv-shim` has to be signed with the `com.apple.security.virtualization` entitlement before it can run Apple Virtualization machines, and every rebuild drops the signature. `just sign` ad-hoc signs it; `just dev`, `just build` and `just test-integration` run it for you. If you build with plain `cargo build`, run `just sign` afterwards.
+
+`crates/pmhv-vz/examples/efi_smoke.rs` boots Apple's EFI firmware without the rest of pmhv, which helps when debugging the framework bindings. It needs signing the same way.
 
 ## Testing
 
