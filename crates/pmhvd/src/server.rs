@@ -8,7 +8,10 @@ use tokio::net::{TcpListener, UnixListener, UnixStream};
 use tokio::sync::watch;
 use tracing::info;
 
+use std::sync::Arc;
+
 use crate::api::{self, AppState};
+use crate::auth::Auth;
 use crate::config::Config;
 use crate::machines::{Context, MachineError, Machines};
 use crate::paths::Paths;
@@ -45,7 +48,12 @@ pub fn app(state: AppState) -> Router {
 }
 
 /// Serves the same app over TCP (browser) and the control socket (CLI) until a shutdown signal.
-pub async fn run(config: &Config, paths: &Paths, context: Context) -> Result<(), ServeError> {
+pub async fn run(
+    config: &Config,
+    paths: &Paths,
+    context: Context,
+    auth: Arc<Auth>,
+) -> Result<(), ServeError> {
     // The control socket goes first so a second instance reports "already running" rather than a port clash.
     let socket_path = paths.control_socket();
     let control = bind_control_socket(&paths.runtime_dir, &socket_path).await?;
@@ -72,7 +80,13 @@ pub async fn run(config: &Config, paths: &Paths, context: Context) -> Result<(),
     let (stop_tx, stop_rx) = watch::channel(false);
     let state = AppState {
         machines,
+        auth,
+        local: false,
         shutdown: stop_rx.clone(),
+    };
+    let local_state = AppState {
+        local: true,
+        ..state.clone()
     };
     let mut http_stop = stop_rx.clone();
     let mut control_stop = stop_rx;
@@ -80,7 +94,7 @@ pub async fn run(config: &Config, paths: &Paths, context: Context) -> Result<(),
     let http = axum::serve(tcp, app(state.clone())).with_graceful_shutdown(async move {
         let _ = http_stop.wait_for(|stop| *stop).await;
     });
-    let control = axum::serve(control, app(state)).with_graceful_shutdown(async move {
+    let control = axum::serve(control, app(local_state)).with_graceful_shutdown(async move {
         let _ = control_stop.wait_for(|stop| *stop).await;
     });
     let signal = async move {

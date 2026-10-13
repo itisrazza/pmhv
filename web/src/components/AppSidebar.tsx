@@ -1,4 +1,6 @@
 import { Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
+import { getGetSessionQueryKey, useLogout } from "../api/auth/auth";
 import {
   Sidebar,
   SidebarContent,
@@ -12,7 +14,14 @@ import {
   SidebarMenuItem,
   SidebarSeparator,
 } from "@swopstar/react-ui";
-import { Box, FileBox, Network, Settings, type LucideIcon } from "lucide-react";
+import {
+  Box,
+  FileBox,
+  LogOut,
+  Network,
+  Settings,
+  type LucideIcon,
+} from "lucide-react";
 
 interface NavItem {
   to: "/machines" | "/images" | "/networks" | "/settings";
@@ -47,6 +56,31 @@ function NavMenu({ items }: { items: readonly NavItem[] }) {
   );
 }
 
+function DisconnectButton() {
+  const queryClient = useQueryClient();
+  const logout = useLogout({
+    mutation: {
+      onSettled: () => {
+        queryClient.clear();
+        void queryClient.invalidateQueries({
+          queryKey: getGetSessionQueryKey(),
+        });
+      },
+    },
+  });
+  return (
+    <SidebarMenuItem>
+      <SidebarMenuButton
+        onClick={() => logout.mutate()}
+        disabled={logout.isPending}
+      >
+        <LogOut size={16} />
+        Disconnect
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  );
+}
+
 export function AppSidebar() {
   return (
     <Sidebar>
@@ -76,6 +110,9 @@ export function AppSidebar() {
 
       <SidebarFooter>
         <NavMenu items={footerItems} />
+        <SidebarMenu>
+          <DisconnectButton />
+        </SidebarMenu>
       </SidebarFooter>
     </Sidebar>
   );

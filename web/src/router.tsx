@@ -8,7 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { Toaster } from "@swopstar/react-ui";
 import { AppLayout } from "./layouts/AppLayout";
-import { useMachineEvents } from "./lib/events";
+import { AuthGate } from "./components/AuthGate";
 import { DiskImagesPage } from "./pages/DiskImagesPage";
 import { MachinePage } from "./pages/MachinePage";
 import { MachinesPage } from "./pages/MachinesPage";
@@ -22,10 +22,11 @@ declare module "@tanstack/react-router" {
 }
 
 function Root() {
-  useMachineEvents();
   return (
     <>
-      <Outlet />
+      <AuthGate>
+        <Outlet />
+      </AuthGate>
       <Toaster />
     </>
   );

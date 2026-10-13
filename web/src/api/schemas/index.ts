@@ -8,6 +8,7 @@
 
 export * from './apiError';
 export * from './arch';
+export * from './authStatus';
 export * from './backend';
 export * from './consoleKind';
 export * from './createMachineRequest';
@@ -22,6 +23,7 @@ export * from './imageFormat';
 export * from './imageGroup';
 export * from './imageInfo';
 export * from './imageRef';
+export * from './loginRequest';
 export * from './machine';
 export * from './machineSpec';
 export * from './machineState';
@@ -29,5 +31,6 @@ export * from './networkSpec';
 export * from './newDisk';
 export * from './powerAction';
 export * from './powerRequest';
+export * from './setPasswordRequest';
 export * from './thumbnail';
 export * from './thumbnailKind';

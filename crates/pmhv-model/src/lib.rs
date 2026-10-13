@@ -1,5 +1,6 @@
 //! Types shared between the pmhv daemon, CLI and web UI (via OpenAPI).
 
+mod auth;
 mod error;
 mod event;
 mod host;
@@ -8,6 +9,7 @@ pub mod machine;
 pub mod paths;
 pub mod report;
 
+pub use auth::{AuthStatus, LoginRequest, SetPasswordRequest, TemporaryPassword};
 pub use error::ApiError;
 pub use event::Event;
 pub use host::HostInfo;

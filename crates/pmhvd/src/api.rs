@@ -2,7 +2,10 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::extract::{OriginalUri, Path, State, WebSocketUpgrade};
-use axum::http::{StatusCode, header};
+use std::time::Duration;
+
+use axum::http::{HeaderMap, StatusCode, header};
+use axum::middleware;
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -11,8 +14,8 @@ use futures_util::Stream;
 use futures_util::StreamExt;
 use pmhv_model::report::error_chain;
 use pmhv_model::{
-    ApiError, CreateMachineRequest, Event, HostInfo, ImageGroup, Machine, MachineId, MachineSpec,
-    PowerRequest, ThumbnailKind,
+    ApiError, AuthStatus, CreateMachineRequest, Event, HostInfo, ImageGroup, LoginRequest, Machine,
+    MachineId, MachineSpec, PowerRequest, SetPasswordRequest, TemporaryPassword, ThumbnailKind,
 };
 use tokio::net::UnixStream;
 use tokio::sync::watch;
@@ -20,6 +23,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 use utoipa::OpenApi;
 
+use crate::access;
+use crate::auth::{Auth, AuthError, SESSION_LIFETIME, SessionKind};
 use crate::console;
 use crate::images::ImageError;
 use crate::machines::{MachineError, Machines};
@@ -28,6 +33,10 @@ use crate::machines::{MachineError, Machines};
 #[openapi(
     info(title = "pmhv", description = "Poor Man's HyperVisor daemon API"),
     paths(
+        login,
+        logout,
+        session,
+        set_password,
         host_info,
         list_machines,
         create_machine,
@@ -44,12 +53,19 @@ pub struct ApiDoc;
 #[derive(Clone)]
 pub struct AppState {
     pub machines: Arc<Machines>,
+    pub auth: Arc<Auth>,
+    /// Requests over the local control socket, which filesystem permissions already restrict.
+    pub local: bool,
     /// Flips to true on shutdown, so endless responses (the event stream) can finish.
     pub shutdown: watch::Receiver<bool>,
 }
 
 pub fn router(state: AppState) -> Router {
-    let v1 = Router::new()
+    let mut v1 = Router::new()
+        .route("/auth/login", post(login))
+        .route("/auth/logout", post(logout))
+        .route("/auth/session", get(session))
+        .route("/auth/password", post(set_password))
         .route("/host", get(host_info))
         .route("/machines", get(list_machines).post(create_machine))
         .route(
@@ -62,9 +78,20 @@ pub fn router(state: AppState) -> Router {
         .route("/machines/{id}/thumbnail", get(thumbnail))
         .route("/images", get(list_images))
         .route("/events", get(events));
-    Router::new()
-        .nest("/api", Router::new().nest("/v1", v1).fallback(not_found))
-        .with_state(state)
+    if state.local {
+        v1 = v1.route("/auth/reset", post(reset_auth));
+    }
+    let api = Router::new().nest("/api", Router::new().nest("/v1", v1).fallback(not_found));
+    let api = if state.local {
+        api
+    } else {
+        api.layer(middleware::from_fn_with_state(
+            state.clone(),
+            access::require_session,
+        ))
+        .layer(middleware::from_fn(access::same_origin))
+    };
+    api.with_state(state)
 }
 
 /// An error as the API reports it.
@@ -72,6 +99,28 @@ pub struct ApiFailure {
     status: StatusCode,
     code: &'static str,
     message: String,
+}
+
+impl ApiFailure {
+    pub fn new(status: StatusCode, code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            code,
+            message: message.into(),
+        }
+    }
+}
+
+impl From<AuthError> for ApiFailure {
+    fn from(error: AuthError) -> Self {
+        let (status, code) = match &error {
+            AuthError::InvalidCredentials => (StatusCode::UNAUTHORIZED, "invalid_credentials"),
+            AuthError::NoSession => (StatusCode::UNAUTHORIZED, "unauthenticated"),
+            AuthError::PasswordTooShort => (StatusCode::UNPROCESSABLE_ENTITY, "weak_password"),
+            _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+        };
+        Self::new(status, code, error_chain(&error))
+    }
 }
 
 impl IntoResponse for ApiFailure {
@@ -134,6 +183,96 @@ fn image_failure(error: &ImageError, message: String) -> ApiFailure {
 }
 
 type ApiResult<T> = Result<T, ApiFailure>;
+
+/// Slows down password guessing without making a typo painful.
+const FAILED_LOGIN_DELAY: Duration = Duration::from_millis(750);
+
+/// Signs in with the password (or the temporary one, which only allows setting a password).
+#[utoipa::path(post, path = "/api/v1/auth/login", operation_id = "login", tag = "auth",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Signed in; the session cookie is set", body = AuthStatus),
+        (status = 401, description = "Wrong password", body = ApiError),
+    ))]
+async fn login(
+    State(AppState { auth, .. }): State<AppState>,
+    Json(request): Json<LoginRequest>,
+) -> ApiResult<Response> {
+    let (token, kind) = match auth.login(&request.password).await {
+        Ok(session) => session,
+        Err(error) => {
+            tokio::time::sleep(FAILED_LOGIN_DELAY).await;
+            return Err(error.into());
+        }
+    };
+    let status = AuthStatus {
+        authenticated: true,
+        setup_required: kind == SessionKind::Setup,
+    };
+    Ok((
+        [(
+            header::SET_COOKIE,
+            access::session_cookie(&token, SESSION_LIFETIME.as_secs()),
+        )],
+        Json(status),
+    )
+        .into_response())
+}
+
+#[utoipa::path(post, path = "/api/v1/auth/logout", operation_id = "logout", tag = "auth",
+    responses((status = 204, description = "Signed out; the session cookie is cleared")))]
+async fn logout(State(AppState { auth, .. }): State<AppState>, headers: HeaderMap) -> Response {
+    if let Some(token) = access::session_token(&headers) {
+        auth.logout(&token);
+    }
+    (
+        StatusCode::NO_CONTENT,
+        [(header::SET_COOKIE, access::session_cookie("", 0))],
+    )
+        .into_response()
+}
+
+#[utoipa::path(get, path = "/api/v1/auth/session", operation_id = "getSession", tag = "auth",
+    responses((status = 200, description = "Whether this browser is signed in", body = AuthStatus)))]
+async fn session(
+    State(AppState { auth, local, .. }): State<AppState>,
+    headers: HeaderMap,
+) -> Json<AuthStatus> {
+    let kind = access::session_token(&headers).and_then(|token| auth.session(&token));
+    Json(AuthStatus {
+        authenticated: local || kind.is_some(),
+        setup_required: !local && kind == Some(SessionKind::Setup),
+    })
+}
+
+/// Sets the password. Other sessions are signed out.
+#[utoipa::path(post, path = "/api/v1/auth/password", operation_id = "setPassword", tag = "auth",
+    request_body = SetPasswordRequest,
+    responses(
+        (status = 200, description = "Password set", body = AuthStatus),
+        (status = 422, description = "Password too short", body = ApiError),
+    ))]
+async fn set_password(
+    State(AppState { auth, .. }): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SetPasswordRequest>,
+) -> ApiResult<Json<AuthStatus>> {
+    let token = access::session_token(&headers).ok_or(AuthError::NoSession)?;
+    auth.set_password(&token, &request.password).await?;
+    Ok(Json(AuthStatus {
+        authenticated: true,
+        setup_required: false,
+    }))
+}
+
+/// Local socket only: forget the password and issue a new temporary one.
+async fn reset_auth(
+    State(AppState { auth, .. }): State<AppState>,
+) -> ApiResult<Json<TemporaryPassword>> {
+    Ok(Json(TemporaryPassword {
+        password: auth.reset()?,
+    }))
+}
 
 /// Facts about the host pmhvd runs on.
 #[utoipa::path(get, path = "/api/v1/host", operation_id = "getHost", tag = "host",
@@ -309,7 +448,9 @@ async fn thumbnail(
 
 /// Server-sent events: machine changes, plus `lagged` if this client fell behind and should refetch.
 async fn events(
-    State(AppState { machines, shutdown }): State<AppState>,
+    State(AppState {
+        machines, shutdown, ..
+    }): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
     let mut shutdown = shutdown;
     let stopping = async move {

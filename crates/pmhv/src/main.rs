@@ -11,7 +11,7 @@ use pmhv_model::paths::{control_socket_in, default_runtime_dir};
 use pmhv_model::report::error_chain;
 use pmhv_model::{
     CreateMachineRequest, DiskBus, HostInfo, ImageGroup, Machine, MachineSpec, NewDisk,
-    PowerAction, PowerRequest,
+    PowerAction, PowerRequest, TemporaryPassword,
 };
 use serde::Serialize;
 
@@ -77,6 +77,15 @@ enum Command {
     },
     /// List storage groups and their images.
     Images,
+    /// Manage the web UI's sign-in.
+    #[command(subcommand)]
+    Auth(AuthCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum AuthCommand {
+    /// Forget the password, sign out every browser, and print a new temporary password.
+    Reset,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -189,6 +198,15 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Command::Reset { machine } => power(&client, &output, &machine, PowerAction::Reset).await,
         Command::Pause { machine } => power(&client, &output, &machine, PowerAction::Pause).await,
         Command::Resume { machine } => power(&client, &output, &machine, PowerAction::Resume).await,
+        Command::Auth(AuthCommand::Reset) => {
+            let temporary: TemporaryPassword = client
+                .post("/api/v1/auth/reset", &serde_json::json!({}))
+                .await?;
+            output.print(&temporary, || {
+                println!("Temporary password: {}", temporary.password);
+                println!("Sign in with it in the web UI, then choose a new password.");
+            })
+        }
         Command::Images => {
             let groups: Vec<ImageGroup> = client.get("/api/v1/images").await?;
             output.print(&groups, || print_images(&groups))

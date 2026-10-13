@@ -1,7 +1,9 @@
 #[cfg(not(unix))]
 compile_error!("pmhvd only supports unix hosts for now; Windows support is planned");
 
+mod access;
 mod api;
+mod auth;
 mod config;
 mod console;
 mod images;
@@ -22,6 +24,9 @@ use pmhv_model::report::error_chain;
 use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
 
+use std::sync::Arc;
+
+use crate::auth::{Auth, AuthError};
 use crate::config::{Config, ConfigError};
 use crate::images::ImageStore;
 use crate::machines::Context;
@@ -62,6 +67,8 @@ enum DaemonError {
     Openapi(#[source] serde_json::Error),
     #[error(transparent)]
     Qemu(#[from] pmhv_qemu::host::HostError),
+    #[error(transparent)]
+    Auth(#[from] AuthError),
     #[error(
         "can't find pmhvd's own location to look for pmhv-shim next to it; set `shim` in config.toml"
     )]
@@ -100,7 +107,8 @@ async fn run(cli: Cli) -> Result<(), DaemonError> {
             let paths = Paths::resolve(cli.data_dir, cli.runtime_dir)?;
             let config = Config::load(&paths.config_file())?;
             let context = context(&config, &paths)?;
-            server::run(&config, &paths, context).await?;
+            let auth = Arc::new(Auth::load(&paths.data_dir)?);
+            server::run(&config, &paths, context, auth).await?;
             Ok(())
         }
     }
