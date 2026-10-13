@@ -1,0 +1,9 @@
+version = 1
+SPDX-PackageName = "pmhv"
+SPDX-PackageSupplier = "Rareș Nistor <raresh@nistor.email>"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Rareș Nistor <raresh@nistor.email>"
+SPDX-License-Identifier = "MIT OR Apache-2.0"
