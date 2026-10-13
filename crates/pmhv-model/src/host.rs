@@ -10,4 +10,6 @@ pub struct HostInfo {
     pub os: String,
     /// Host CPU architecture, as Rust names it (`aarch64`, `x86_64`).
     pub arch: String,
+    /// Backends machines can use on this host.
+    pub backends: Vec<crate::Backend>,
 }

@@ -22,7 +22,13 @@ import {
   getListMachinesQueryKey,
   useCreateMachine,
 } from "../api/machines/machines";
-import type { Arch, ConsoleKind, GuestOs, ImageInfo } from "../api/schemas";
+import type {
+  Arch,
+  Backend,
+  ConsoleKind,
+  GuestOs,
+  ImageInfo,
+} from "../api/schemas";
 import { archLabels, consoleLabels, formatBytes } from "../lib/labels";
 import {
   defaultsFor,
@@ -51,6 +57,33 @@ const consoleChoices: Choice<ConsoleKind>[] = [
   { value: "text", label: consoleLabels.text },
   { value: "graphical", label: consoleLabels.graphical },
 ];
+
+function backendChoices(
+  backends: Backend[],
+  guestOs: GuestOs,
+): Choice<Backend>[] {
+  const all: Choice<Backend>[] = [
+    { value: "qemu", label: "QEMU (recommended)" },
+    {
+      value: "vz",
+      label: "Apple Virtualization",
+      disabled: !supportsVz(guestOs),
+    },
+    { value: "dummy", label: "Dummy (simulated, for developing pmhv)" },
+  ];
+  return all.filter((choice) => backends.includes(choice.value));
+}
+
+function backendHint(backend: Backend): string | undefined {
+  switch (backend) {
+    case "vz":
+      return "Text console only for now, and disks must be raw .img images.";
+    case "dummy":
+      return "Nothing really boots: a fake console and test pattern, for trying pmhv out.";
+    case "qemu":
+      return undefined;
+  }
+}
 
 function archChoices(hostArch: Arch): Choice<Arch>[] {
   return (["aarch64", "x86_64"] as const).map((arch) => ({
@@ -89,13 +122,12 @@ export function CreateMachineDialog({
     return null;
   }
   const hostArch: Arch = host.data.arch === "x86_64" ? "x86_64" : "aarch64";
-  const vzAvailable = host.data.os === "macos";
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open && (
         <CreateMachineForm
           hostArch={hostArch}
-          vzAvailable={vzAvailable}
+          backends={host.data.backends}
           onDone={() => onOpenChange(false)}
         />
       )}
@@ -105,16 +137,18 @@ export function CreateMachineDialog({
 
 function CreateMachineForm({
   hostArch,
-  vzAvailable,
+  backends,
   onDone,
 }: {
   hostArch: Arch;
-  vzAvailable: boolean;
+  backends: Backend[];
   onDone: () => void;
 }) {
-  const [draft, setDraft] = useState<MachineDraft>(() =>
-    initialDraft(hostArch),
-  );
+  const [draft, setDraft] = useState<MachineDraft>(() => ({
+    ...initialDraft(hostArch),
+    // Without QEMU (in a container, say), start from whatever's there.
+    backend: backends.includes("qemu") ? "qemu" : (backends[0] ?? "qemu"),
+  }));
   const images = useListImages();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -210,27 +244,16 @@ function CreateMachineForm({
           </Field>
         </div>
 
-        {vzAvailable && (
+        {backends.length > 1 && (
           <Field
             id="backend"
             label="Hypervisor"
-            hint={
-              vz
-                ? "Text console only for now, and disks must be raw .img images."
-                : undefined
-            }
+            hint={backendHint(draft.backend)}
           >
             <ChoiceSelect
               id="backend"
               value={draft.backend}
-              choices={[
-                { value: "qemu", label: "QEMU (recommended)" },
-                {
-                  value: "vz",
-                  label: "Apple Virtualization",
-                  disabled: !supportsVz(draft.guestOs),
-                },
-              ]}
+              choices={backendChoices(backends, draft.guestOs)}
               onChange={(backend) => update({ backend })}
             />
           </Field>

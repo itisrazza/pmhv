@@ -12,4 +12,5 @@ export type Backend = typeof Backend[keyof typeof Backend];
 export const Backend = {
   qemu: 'qemu',
   vz: 'vz',
+  dummy: 'dummy',
 } as const;

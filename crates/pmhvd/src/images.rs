@@ -51,6 +51,10 @@ pub enum ImageError {
     ResizeIso,
     #[error("upload failed")]
     Upload(#[source] axum::Error),
+    #[error(
+        "qemu-img isn't installed, so qcow2 images can't be read or created here; install QEMU or use raw .img images"
+    )]
+    QemuImgMissing,
     #[error("unexpected output from qemu-img info for {path}")]
     Info {
         path: PathBuf,
@@ -61,7 +65,8 @@ pub enum ImageError {
 #[derive(Debug, Clone)]
 pub struct ImageStore {
     groups: BTreeMap<String, PathBuf>,
-    qemu_img: PathBuf,
+    /// Absent on hosts without QEMU; only qcow2 work and conversions need it.
+    qemu_img: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,7 +77,11 @@ struct QemuImgInfo {
 }
 
 impl ImageStore {
-    pub fn new(data_dir: &Path, configured: &BTreeMap<String, PathBuf>, qemu_img: PathBuf) -> Self {
+    pub fn new(
+        data_dir: &Path,
+        configured: &BTreeMap<String, PathBuf>,
+        qemu_img: Option<PathBuf>,
+    ) -> Self {
         let mut groups = BTreeMap::from([(
             DEFAULT_GROUP.to_owned(),
             data_dir.join("images").join(DEFAULT_GROUP),
@@ -197,8 +206,14 @@ impl ImageStore {
                 source,
             })?;
         }
+        if format == "raw" {
+            // A sparse file is a raw image; no need for qemu-img (or QEMU at all).
+            return std::fs::File::create_new(&path)
+                .and_then(|file| file.set_len(u64::from(size_gib) << 30))
+                .map_err(|source| ImageError::Io { path, source });
+        }
         let size = format!("{size_gib}G");
-        let mut command = Command::new(&self.qemu_img);
+        let mut command = Command::new(self.qemu_img()?);
         command
             .args(["create", "-q", "-f", format])
             .arg(&path)
@@ -289,7 +304,7 @@ impl ImageStore {
         let dir = target_path.parent().unwrap_or(Path::new("."));
         let partial = dir.join(format!(".{}.convert", target.name));
 
-        let mut command = Command::new(&self.qemu_img);
+        let mut command = Command::new(self.qemu_img()?);
         command
             .args(["convert", "-p", "-f", input_format, "-O", output_format])
             .arg(&source_path)
@@ -297,11 +312,11 @@ impl ImageStore {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
         let mut child = command.spawn().map_err(|source| ImageError::Spawn {
-            program: self.qemu_img.clone(),
+            program: self.program(),
             source,
         })?;
         let mut stdout = child.stdout.take().ok_or_else(|| ImageError::Tool {
-            program: self.qemu_img.clone(),
+            program: self.program(),
             stderr: "no stdout".to_owned(),
         })?;
         let mut buffer = vec![0; 1024];
@@ -322,7 +337,7 @@ impl ImageStore {
             .wait_with_output()
             .await
             .map_err(|source| ImageError::Spawn {
-                program: self.qemu_img.clone(),
+                program: self.program(),
                 source,
             })?;
         let finished = if output.status.success() {
@@ -332,7 +347,7 @@ impl ImageStore {
             })
         } else {
             Err(ImageError::Tool {
-                program: self.qemu_img.clone(),
+                program: self.program(),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             })
         };
@@ -363,7 +378,7 @@ impl ImageStore {
                 current,
             });
         }
-        let mut command = Command::new(&self.qemu_img);
+        let mut command = Command::new(self.qemu_img()?);
         command
             .args(["resize", "-q", "-f", format_name])
             .arg(&path)
@@ -371,20 +386,31 @@ impl ImageStore {
         self.run(command).await.map(|_| ())
     }
 
+    fn qemu_img(&self) -> Result<&Path, ImageError> {
+        self.qemu_img.as_deref().ok_or(ImageError::QemuImgMissing)
+    }
+
+    /// For error messages about qemu-img.
+    fn program(&self) -> PathBuf {
+        self.qemu_img
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("qemu-img"))
+    }
+
     async fn run_qemu_img(&self, args: &[&str], path: &Path) -> Result<Vec<u8>, ImageError> {
-        let mut command = Command::new(&self.qemu_img);
+        let mut command = Command::new(self.qemu_img()?);
         command.args(args).arg(path);
         self.run(command).await
     }
 
     async fn run(&self, mut command: Command) -> Result<Vec<u8>, ImageError> {
         let output = command.output().await.map_err(|source| ImageError::Spawn {
-            program: self.qemu_img.clone(),
+            program: self.program(),
             source,
         })?;
         if !output.status.success() {
             return Err(ImageError::Tool {
-                program: self.qemu_img.clone(),
+                program: self.program(),
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             });
         }
@@ -497,7 +523,7 @@ mod tests {
     #[test]
     fn confines_paths_to_known_groups() {
         let data = tempfile::tempdir().expect("temp dir");
-        let store = ImageStore::new(data.path(), &BTreeMap::new(), PathBuf::from("qemu-img"));
+        let store = ImageStore::new(data.path(), &BTreeMap::new(), None);
         let image = |group: &str, name: &str| ImageRef {
             group: group.to_owned(),
             name: name.to_owned(),

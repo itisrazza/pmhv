@@ -1,7 +1,8 @@
-//! Boots UEFI firmware under QEMU through pmhvd, the shim and the CLI, restarting pmhvd mid-run.
+//! End-to-end tests through pmhvd, the shim and the CLI, restarting pmhvd mid-run: one boots
+//! UEFI firmware under QEMU, the other a dummy machine (no hypervisor needed).
 //!
-//! Needs QEMU with EDK2 firmware and a built workspace, so it's ignored by default:
-//! `just test-integration`.
+//! They need a built workspace (and the QEMU one needs QEMU with EDK2 firmware), so they're
+//! ignored by default: `just test-integration` runs both, `just test-dummy` only the dummy one.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -43,10 +44,14 @@ struct Env {
 
 impl Env {
     fn new() -> Self {
+        Self::with_config("")
+    }
+
+    fn with_config(extra: &str) -> Self {
         let data = tempfile::tempdir().expect("data dir");
         std::fs::write(
             data.path().join("config.toml"),
-            "[http]\nlisten = \"127.0.0.1:0\"\n",
+            format!("[http]\nlisten = \"127.0.0.1:0\"\n{extra}"),
         )
         .expect("config");
         // Socket paths have to stay short, so the runtime directory lives directly in /tmp.
@@ -116,10 +121,20 @@ fn wait_until(what: &str, timeout: Duration, mut done: impl FnMut() -> bool) {
     }
 }
 
+fn machine_id(env: &Env, name: &str) -> String {
+    let output = env.cli(&["show", name, "--json"]);
+    let machine: serde_json::Value = serde_json::from_slice(&output.stdout).expect("JSON");
+    machine["id"].as_str().expect("id").to_owned()
+}
+
 /// Reads the serial console until any of `needles` shows up. Firmware builds differ in what
 /// they print (some distros ship OVMF without the UEFI shell), so callers pass a few.
 fn wait_for_console(socket: &Path, needles: &[&str]) {
-    let mut stream = UnixStream::connect(socket).expect("console socket");
+    let stream = UnixStream::connect(socket).expect("console socket");
+    read_until(&stream, needles);
+}
+
+fn read_until(mut stream: &UnixStream, needles: &[&str]) {
     stream
         .set_read_timeout(Some(Duration::from_millis(500)))
         .expect("timeout");
@@ -189,4 +204,56 @@ fn boots_uefi_and_survives_a_daemon_restart() {
         !env.runtime.path().join("m").join(id).exists(),
         "runtime directory is cleaned up"
     );
+}
+
+#[test]
+#[ignore = "needs a built workspace; run with `just test-dummy`"]
+fn runs_a_dummy_machine_and_survives_a_daemon_restart() {
+    let env = Env::with_config("[dev]\ndummy_backend = true\n");
+    let spec = env.data.path().join("spec.toml");
+    std::fs::write(
+        &spec,
+        "name = \"Dummy\"\nguest_os = \"linux\"\nbackend = \"dummy\"\narch = \"aarch64\"\n\
+         firmware = \"uefi\"\ncpu_cores = 1\nmemory_mib = 512\nnetwork = \"nat\"\nconsole = \"graphical\"\n",
+    )
+    .expect("spec");
+
+    let daemon = env.daemon();
+    env.cli(&[
+        "create",
+        spec.to_str().expect("UTF-8 path"),
+        "--disk-gib",
+        "1",
+    ]);
+    env.cli(&["start", "Dummy"]);
+    env.wait_for_state("Dummy", "running");
+    let dir = env.runtime.path().join("m").join(machine_id(&env, "Dummy"));
+
+    let console = UnixStream::connect(dir.join("con.sock")).expect("console socket");
+    console
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .expect("timeout");
+    read_until(&console, &["Dummy login: "]);
+    (&console).write_all(b"root\r").expect("log in");
+    read_until(&console, &["$ "]);
+    (&console).write_all(b"uname\r").expect("type");
+    read_until(&console, &["pmhv-dummy"]);
+
+    let mut vnc = UnixStream::connect(dir.join("vnc.sock")).expect("VNC socket");
+    let mut greeting = [0; 12];
+    vnc.read_exact(&mut greeting).expect("RFB greeting");
+    assert_eq!(&greeting, b"RFB 003.008\n");
+    drop(vnc);
+
+    drop(daemon);
+    let _daemon = env.daemon();
+    assert_eq!(
+        env.state("Dummy"),
+        "running",
+        "machine survives a pmhvd restart"
+    );
+
+    env.cli(&["stop", "Dummy"]);
+    env.wait_for_state("Dummy", "stopped");
+    assert!(!dir.exists(), "runtime directory is cleaned up");
 }

@@ -1,10 +1,12 @@
-import { Apple, Cpu, Layers, Server } from "lucide-react";
+import { Apple, Cpu, FlaskConical, Layers, Server } from "lucide-react";
 import type { Machine } from "../api/schemas";
 import { archLabels, backendLabels } from "../lib/labels";
 
 export function BackendIcon({ machine }: { machine: Machine }) {
   const label = backendLabels[machine.spec.backend];
-  const Icon = machine.spec.backend === "vz" ? Apple : Server;
+  const Icon = { qemu: Server, vz: Apple, dummy: FlaskConical }[
+    machine.spec.backend
+  ];
   return (
     <Icon size={16} aria-label={label}>
       <title>{label}</title>

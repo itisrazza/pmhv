@@ -68,6 +68,11 @@ test-integration:
     just sign
     cargo test -p pmhvd --test boot -- --ignored
 
+# Run a dummy machine through pmhvd and the shim (no hypervisor needed)
+test-dummy:
+    cargo build --workspace
+    cargo test -p pmhvd --test boot -- --ignored dummy
+
 # Licence metadata (REUSE), for tracked and staged files only so node_modules is skipped
 licences:
     git ls-files -z --cached --others --exclude-standard | xargs -0 reuse lint-file

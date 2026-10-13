@@ -152,6 +152,10 @@ Unix socket paths are limited to 104 bytes on macOS, and `$TMPDIR` there is alre
 - The shim binary must be code-signed with `com.apple.security.virtualization`. Ad-hoc signing works for local development; a `just` recipe handles it. Bridged networking needs `com.apple.vm.networking`, which Apple only grants on request — plan around not having it.
 - Guests: mainly macOS (Apple silicon only, installed from an IPSW, limited to two concurrent macOS VMs by the licence/kernel). Linux guests run on QEMU by default; VZ supports them (ARM64, EFI boot), but it's opt-in, e.g. for Rosetta. Windows ARM isn't a realistic VZ guest (no TPM), so it runs on QEMU.
 
+### Dummy (development)
+
+A simulated machine run entirely inside the shim, enabled with `dev.dummy_backend`, for developing and testing pmhv where there's no hypervisor. It speaks the same shim protocol as the real backends: a serial console with a fake boot and shell, a minimal RFB server (no auth, raw encoding) with a test pattern for graphical consoles, PNG screenshots, and all power actions. `GET /api/v1/host` lists the backends available on the host, and the create dialog only offers those.
+
 ### Linux
 
 QEMU with KVM. No libvirt dependency: it isn't cross-platform, and driving QEMU directly keeps one code path. A libvirt backend could be added later for people who already run libvirt.

@@ -5,7 +5,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
-use pmhv_driver::{Launch, LaunchFile, MachineRuntimeDir};
+use pmhv_driver::{DummyLaunch, Launch, LaunchFile, MachineRuntimeDir};
 use pmhv_model::{
     Arch, Backend, ConsoleKind, DiskBus, DiskMedia, Firmware, GuestOs, ImageFormat, MachineId,
     MachineSpec, NetworkSpec,
@@ -28,6 +28,10 @@ pub enum ResolveError {
     Spec(#[from] SpecError),
     #[error(transparent)]
     Vz(#[from] VzSpecError),
+    #[error("the dummy backend is off; set `dev.dummy_backend = true` in config.toml to use it")]
+    DummyDisabled,
+    #[error("machine name can't be empty")]
+    EmptyName,
     #[error("pmhv can't run guests on a {0} host")]
     UnsupportedHost(&'static str),
     #[error(transparent)]
@@ -45,6 +49,7 @@ pub enum ResolveError {
 }
 
 pub struct Resolver<'a> {
+    pub backends: &'a [Backend],
     pub qemu: &'a QemuConfig,
     pub store: &'a MachineStore,
     pub images: &'a ImageStore,
@@ -56,6 +61,7 @@ impl Resolver<'_> {
         match spec.backend {
             Backend::Qemu => pmhv_qemu::launch::validate(spec)?,
             Backend::Vz => Self::check_vz(spec)?,
+            Backend::Dummy => self.check_dummy(spec)?,
         }
         for (index, disk) in spec.disks.iter().enumerate() {
             self.images
@@ -72,11 +78,23 @@ impl Resolver<'_> {
         dir: &MachineRuntimeDir,
     ) -> Result<LaunchFile, ResolveError> {
         self.check(spec)?;
-        if spec.backend == Backend::Vz {
-            return Ok(LaunchFile {
-                machine_id: id,
-                launch: Launch::Vz(self.vz_launch(id, spec)?),
-            });
+        match spec.backend {
+            Backend::Vz => {
+                return Ok(LaunchFile {
+                    machine_id: id,
+                    launch: Launch::Vz(self.vz_launch(id, spec)?),
+                });
+            }
+            Backend::Dummy => {
+                return Ok(LaunchFile {
+                    machine_id: id,
+                    launch: Launch::Dummy(DummyLaunch {
+                        name: spec.name.clone(),
+                        graphical: spec.console == ConsoleKind::Graphical,
+                    }),
+                });
+            }
+            Backend::Qemu => {}
         }
         let host_arch =
             Arch::host().ok_or(ResolveError::UnsupportedHost(std::env::consts::ARCH))?;
@@ -211,6 +229,17 @@ pub enum VzSpecError {
 }
 
 impl Resolver<'_> {
+    /// The dummy backend accepts any hardware, so only the basics are checked.
+    fn check_dummy(&self, spec: &MachineSpec) -> Result<(), ResolveError> {
+        if !self.backends.contains(&Backend::Dummy) {
+            return Err(ResolveError::DummyDisabled);
+        }
+        if spec.name.trim().is_empty() {
+            return Err(ResolveError::EmptyName);
+        }
+        Ok(())
+    }
+
     fn check_vz(spec: &MachineSpec) -> Result<(), VzSpecError> {
         if !cfg!(target_os = "macos") {
             return Err(VzSpecError::NotMacos);

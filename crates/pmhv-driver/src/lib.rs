@@ -26,4 +26,13 @@ pub struct LaunchFile {
 pub enum Launch {
     Qemu(Box<QemuLaunch>),
     Vz(VzLaunch),
+    Dummy(DummyLaunch),
+}
+
+/// A simulated machine, run entirely inside the shim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DummyLaunch {
+    pub name: String,
+    /// Serve a VNC framebuffer (a moving test pattern) as well as the serial console.
+    pub graphical: bool,
 }

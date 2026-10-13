@@ -28,6 +28,7 @@ export const guestOsLabels: Record<GuestOs, string> = {
 export const backendLabels: Record<Backend, string> = {
   qemu: "QEMU",
   vz: "Apple Virtualization",
+  dummy: "Dummy",
 };
 
 export const archLabels: Record<Arch, string> = {

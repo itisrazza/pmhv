@@ -208,6 +208,7 @@ fn image_failure(error: &ImageError, message: String) -> ApiFailure {
         | ImageError::ConvertToIso
         | ImageError::ResizeIso => (StatusCode::UNPROCESSABLE_ENTITY, "invalid_image"),
         ImageError::Upload(_) => (StatusCode::BAD_REQUEST, "upload_failed"),
+        ImageError::QemuImgMissing => (StatusCode::UNPROCESSABLE_ENTITY, "qemu_img_missing"),
         _ => (StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
     ApiFailure {
@@ -361,11 +362,12 @@ async fn set_preferences(
 /// Facts about the host pmhvd runs on.
 #[utoipa::path(get, path = "/api/v1/host", operation_id = "getHost", tag = "host",
     responses((status = 200, description = "Host facts", body = HostInfo)))]
-async fn host_info() -> Json<HostInfo> {
+async fn host_info(State(AppState { machines, .. }): State<AppState>) -> Json<HostInfo> {
     Json(HostInfo {
         version: env!("CARGO_PKG_VERSION").to_owned(),
         os: std::env::consts::OS.to_owned(),
         arch: std::env::consts::ARCH.to_owned(),
+        backends: machines.backends().to_vec(),
     })
 }
 
