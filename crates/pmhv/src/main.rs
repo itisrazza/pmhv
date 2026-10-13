@@ -2,6 +2,7 @@
 compile_error!("pmhv only supports unix hosts for now; Windows support is planned");
 
 mod client;
+mod service;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -80,6 +81,24 @@ enum Command {
     /// Manage the web UI's sign-in.
     #[command(subcommand)]
     Auth(AuthCommand),
+    /// Run pmhvd in the background at login (launchd on macOS, systemd on Linux).
+    #[command(subcommand)]
+    Service(ServiceCommand),
+}
+
+#[derive(Debug, Subcommand)]
+enum ServiceCommand {
+    /// Install and start the service.
+    Install {
+        /// Path to pmhvd. Defaults to the one next to pmhv.
+        #[arg(long)]
+        pmhvd: Option<PathBuf>,
+        /// Print the service definition instead of installing it.
+        #[arg(long)]
+        print: bool,
+    },
+    /// Stop and remove the service. Running machines keep running.
+    Uninstall,
 }
 
 #[derive(Debug, Subcommand)]
@@ -111,6 +130,8 @@ impl From<Bus> for DiskBus {
 enum CliError {
     #[error(transparent)]
     Client(#[from] ClientError),
+    #[error(transparent)]
+    Service(#[from] service::ServiceError),
     #[error("failed to render JSON")]
     Json(#[source] serde_json::Error),
     #[error("failed to read spec file {path}")]
@@ -206,6 +227,28 @@ async fn run(cli: Cli) -> Result<(), CliError> {
                 println!("Temporary password: {}", temporary.password);
                 println!("Sign in with it in the web UI, then choose a new password.");
             })
+        }
+        Command::Service(ServiceCommand::Install { pmhvd, print }) => {
+            let daemon = match pmhvd {
+                Some(path) => path,
+                None => service::default_daemon()?,
+            };
+            let spec = service::ServiceSpec::new(daemon)?;
+            if print {
+                let (path, contents) = service::definition(&spec)?;
+                println!("# {}", path.display());
+                print!("{contents}");
+            } else {
+                let path = service::install(&spec)?;
+                println!("installed {} and started pmhvd", path.display());
+                println!("log: {}", spec.log.display());
+            }
+            Ok(())
+        }
+        Command::Service(ServiceCommand::Uninstall) => {
+            let path = service::uninstall()?;
+            println!("stopped pmhvd and removed {}", path.display());
+            Ok(())
         }
         Command::Images => {
             let groups: Vec<ImageGroup> = client.get("/api/v1/images").await?;

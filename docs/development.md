@@ -89,6 +89,14 @@ To keep development state separate, point both binaries elsewhere with `PMHV_DAT
 
 There's no TLS yet, so keep `listen` on localhost: on a LAN the password and session cookie would cross the network in the clear.
 
+### As a background service
+
+```bash
+cargo run -p pmhv -- service install
+```
+
+This installs and starts a launchd agent (macOS) or systemd user unit (Linux) running the `pmhvd` next to `pmhv`; `--pmhvd <path>` picks another, and `--print` shows the definition without installing it. `pmhv service uninstall` stops and removes it; running machines carry on.
+
 ## Commands
 
 All orchestration goes through [`just`](https://github.com/casey/just):

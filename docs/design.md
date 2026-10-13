@@ -296,7 +296,7 @@ The daemon can boot arbitrary code and read arbitrary files on the host, so ever
 - macOS: a launchd user agent (`~/Library/LaunchAgents`). VZ works from a user agent. **[verify]** behaviour across logout and on a closed-lid MacBook; sleep is the bigger practical issue, and pmhv may want to hold a power assertion while VMs run.
 - Linux: a systemd user unit (with lingering for headless hosts) or a system unit.
 - Windows (later): a per-user startup task first; a proper service after that.
-- `pmhv service install|uninstall` writes the right unit for the platform.
+- `pmhv service install|uninstall` writes the right unit for the platform and starts or stops it; `--print` shows it without installing. The unit captures the installing shell's `PATH` (service managers start with a minimal one, and pmhvd needs QEMU). Stopping the service must leave machines running, so the launchd agent sets `AbandonProcessGroup` and the systemd unit sets `KillMode=process`; shims are in their own process group either way.
 
 ## Repository layout
 
