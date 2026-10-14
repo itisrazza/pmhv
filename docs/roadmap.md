@@ -29,6 +29,7 @@ Not scheduled yet:
 - Snapshots and cloning
 - cloud-init / unattended install
 - Import from UTM and VirtualBox
+- Status indicators in the macOS menu bar and the Windows notification area: the thin helper mentioned under [non-goals](design.md#non-goals-for-now)
 - A designed create-machine flow (replacing the [placeholder](design.md#creating-a-machine))
 
 ## Status
