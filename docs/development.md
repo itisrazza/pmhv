@@ -134,6 +134,7 @@ All orchestration goes through [`just`](https://github.com/casey/just):
 | `just test` | Unit tests |
 | `just test-integration` | Boots UEFI firmware under QEMU, and runs a dummy machine, through `pmhvd`, the shim and the CLI, restarting `pmhvd` mid-run |
 | `just test-dummy` | Just the dummy machine test, which needs no hypervisor |
+| `just test-ui` | Builds everything, then drives the web UI in headless Chromium against an isolated `pmhvd` |
 | `just sign` | Signs `pmhv-shim` with the Virtualization.framework entitlement (macOS) |
 | `just licences` | REUSE check on tracked files |
 
@@ -150,6 +151,7 @@ On macOS, `pmhv-shim` has to be signed with the `com.apple.security.virtualizati
 - Table-driven unit tests cover the pure parts: the QEMU command-line builder, spec validation, firmware descriptor matching, image names and path confinement, config parsing, the spec store, terminal text cleanup, sign-in and cookies.
 - The QMP client is tested against a fake QMP server.
 - `just test-integration` boots EDK2's UEFI shell (no guest OS download needed) with HVF on macOS or KVM on Linux, checks the serial console, kills and restarts `pmhvd`, and checks the machine kept running. CI runs it on Linux.
+- `just test-ui` drives the web UI in headless Chromium with [Puppeteer](https://pptr.dev/) (`web/tests/ui`). It starts its own `pmhvd` with a temporary data directory, a runtime directory under `/tmp` and a free port, so it leaves a `pmhvd` you already have running alone, and force-stops its machines and stops that `pmhvd` afterwards. The tests sign in with the temporary password and set a real one, toggle the sidebar at desktop and phone widths, load each page, create a machine from the dialog and boot it to UEFI firmware output on the text console, favourite it and force-stop it, and check a graphical console shows the firmware. Any page error, console error or HTTP error fails the test. It needs QEMU and a Chromium-based browser: `/Applications/Chromium.app` on macOS by default, or set `PMHV_CHROMIUM` to the executable (it's required on Linux). CI runs it on Linux with Google Chrome.
 - VZ integration tests will run on macOS only, locally; CI runners may not allow nested virtualisation.
 
 ## Conventions
