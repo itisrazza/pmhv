@@ -22,7 +22,7 @@ pmhv (Poor Man's HyperVisor) is a small daemon and web UI for running virtual ma
 - Clustering, live migration, HA — this is one host.
 - Containers.
 - Replacing the host OS or requiring root/admin for basic use.
-- A native desktop app. (A thin menu-bar/tray helper may come later.)
+- A native desktop app. (A thin menu-bar/tray helper is planned after packaging; see the [roadmap](roadmap.md#after-the-mvp).)
 
 ## Reading the mockups
 

@@ -19,8 +19,9 @@ Roughly in order:
 
 7. **VZ private API spike** for a host-side graphical console (see [Consoles](design.md#consoles)).
 8. **Networking and isolation.** Userspace switch, isolated networks, DHCP, port forwards, egress policy and logging (see [Networking](design.md#networking)). Port forwards on QEMU's built-in NAT are done already.
-9. **Packaging.** Signed and notarised macOS builds, known-good QEMU and `swtpm` builds shipped with pmhv, service install. `pmhv service install` (launchd agent or systemd user service) is done already.
-10. **Windows.** QEMU + WHPX, named pipes, service install.
+9. **Packaging.** Signed and notarised macOS builds, known-good QEMU and `swtpm` builds shipped with pmhv, service install. A simple installer and uninstaller, with a short first-run flow that registers the service and sets the password, then opens the UI in a browser. `pmhv service install` (launchd agent or systemd user service) is done already.
+10. **Status indicator.** A lightweight helper in the macOS menu bar (and the Windows notification area once Windows is supported) showing running machines and resource usage, with a link to open the UI on localhost.
+11. **Windows.** QEMU + WHPX, named pipes, service install. The same installer, uninstaller and first-run flow as on macOS.
 
 ## Candidates
 
@@ -29,7 +30,6 @@ Not scheduled yet:
 - Snapshots and cloning
 - cloud-init / unattended install
 - Import from UTM and VirtualBox
-- Status indicators in the macOS menu bar and the Windows notification area: the thin helper mentioned under [non-goals](design.md#non-goals-for-now)
 - A designed create-machine flow (replacing the [placeholder](design.md#creating-a-machine))
 
 ## Status
