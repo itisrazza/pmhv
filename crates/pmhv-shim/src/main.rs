@@ -7,6 +7,7 @@ compile_error!("pmhv-shim only supports unix hosts for now; Windows support is p
 
 mod console;
 mod control;
+mod dummy;
 mod machine;
 #[cfg(target_os = "macos")]
 mod vz;
@@ -123,6 +124,7 @@ async fn run(Prepared { launch, dir }: Prepared) -> Result<(), ShimError> {
     let graphical = match &launch {
         Launch::Qemu(qemu) => qemu.graphical,
         Launch::Vz(_) => false,
+        Launch::Dummy(dummy) => dummy.graphical,
     };
     let machine = Machine::new(graphical);
     let (control, console) = match bind(&dir.shim_socket())

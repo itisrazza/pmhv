@@ -810,7 +810,8 @@
         "type": "string",
         "enum": [
           "qemu",
-          "vz"
+          "vz",
+          "dummy"
         ]
       },
       "ConsoleKind": {
@@ -1000,12 +1001,20 @@
         "required": [
           "version",
           "os",
-          "arch"
+          "arch",
+          "backends"
         ],
         "properties": {
           "arch": {
             "type": "string",
             "description": "Host CPU architecture, as Rust names it (`aarch64`, `x86_64`)."
+          },
+          "backends": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Backend"
+            },
+            "description": "Backends machines can use on this host."
           },
           "os": {
             "type": "string",

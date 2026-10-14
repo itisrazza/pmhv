@@ -22,6 +22,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
+use pmhv_model::Backend;
 use pmhv_model::report::error_chain;
 use tracing_subscriber::EnvFilter;
 use utoipa::OpenApi;
@@ -119,7 +120,12 @@ async fn run(cli: Cli) -> Result<(), DaemonError> {
 }
 
 fn context(config: &Config, paths: &Paths) -> Result<Context, DaemonError> {
-    let qemu_img = pmhv_qemu::host::find_binary("qemu-img", config.qemu.bin_dir.as_deref())?;
+    // QEMU is optional (a host may only use Apple Virtualization or the dummy backend), so a
+    // missing qemu-img only matters once something needs it.
+    let qemu_img = pmhv_qemu::host::find_binary("qemu-img", config.qemu.bin_dir.as_deref())
+        .inspect_err(|error| tracing::warn!(%error, "qemu-img not found; qcow2 images won't work"))
+        .ok();
+    let backends = available_backends(config);
     let shim = match &config.shim {
         Some(path) => path.clone(),
         None => std::env::current_exe()
@@ -133,5 +139,22 @@ fn context(config: &Config, paths: &Paths) -> Result<Context, DaemonError> {
         runtime_dir: paths.runtime_dir.clone(),
         shim,
         thumbnail_interval: std::time::Duration::from_secs(config.thumbnails.interval_secs),
+        backends,
     })
+}
+
+/// Backends machines can use here: QEMU when its system binary for this architecture is
+/// installed, Apple Virtualization on macOS, and the dummy backend when enabled.
+fn available_backends(config: &Config) -> Vec<Backend> {
+    let qemu = pmhv_model::Arch::host().is_some_and(|arch| {
+        pmhv_qemu::host::find_system_binary(arch, config.qemu.bin_dir.as_deref()).is_ok()
+    });
+    [
+        (Backend::Qemu, qemu),
+        (Backend::Vz, cfg!(target_os = "macos")),
+        (Backend::Dummy, config.dev.dummy_backend),
+    ]
+    .into_iter()
+    .filter_map(|(backend, available)| available.then_some(backend))
+    .collect()
 }

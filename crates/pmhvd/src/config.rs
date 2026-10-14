@@ -25,6 +25,7 @@ pub struct Config {
     pub qemu: QemuConfig,
     pub images: ImagesConfig,
     pub thumbnails: ThumbnailsConfig,
+    pub dev: DevConfig,
     /// Path to `pmhv-shim`. Defaults to the one next to `pmhvd`.
     pub shim: Option<PathBuf>,
 }
@@ -75,6 +76,14 @@ impl Default for ThumbnailsConfig {
     }
 }
 
+/// Settings for developing pmhv itself.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct DevConfig {
+    /// Offer the dummy backend: simulated machines that need no hypervisor.
+    pub dummy_backend: bool,
+}
+
 impl Config {
     /// Loads the config file, or the defaults when it doesn't exist yet.
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
@@ -119,6 +128,7 @@ mod tests {
             ("[http]\nlisten = \"0.0.0.0:9000\"\n", true),
             ("[images.groups]\nexternal = \"/Volumes/VMs\"\n", true),
             ("[thumbnails]\ninterval_secs = 60\n", true),
+            ("[dev]\ndummy_backend = true\n", true),
             ("[http]\nlisten_on = \"0.0.0.0:9000\"\n", false),
             ("[http]\nlisten = \"not an address\"\n", false),
         ];

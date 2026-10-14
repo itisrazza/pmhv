@@ -126,7 +126,7 @@ mod tests {
     fn round_trips_specs() {
         let data = tempfile::tempdir().expect("temp dir");
         let store = MachineStore::new(data.path());
-        assert!(store.load_all().expect("empty store").is_empty());
+        assert_eq!(store.load_all().expect("empty store"), Vec::new());
 
         let spec = MachineSpec {
             name: "Windows ARM Runner".to_owned(),
@@ -161,6 +161,6 @@ mod tests {
 
         assert_eq!(store.load_all().expect("load"), vec![(id, spec)]);
         store.delete(id).expect("delete");
-        assert!(store.load_all().expect("load after delete").is_empty());
+        assert_eq!(store.load_all().expect("load after delete"), Vec::new());
     }
 }

@@ -95,6 +95,19 @@ To keep development state separate, point both binaries elsewhere with `PMHV_DAT
 
 There's no TLS yet, so keep `listen` on localhost: on a LAN the password and session cookie would cross the network in the clear.
 
+### Without a hypervisor
+
+In a container or cloud environment (no QEMU, no KVM, no Apple Virtualization), enable the dummy backend in the data directory's `config.toml`:
+
+```toml
+[dev]
+dummy_backend = true
+```
+
+Dummy machines are simulated inside `pmhv-shim`: a fake boot log, login prompt and tiny shell on the serial console (`help` lists its commands; `poweroff` and `reboot` work), and, for graphical consoles, a built-in VNC server showing a moving test pattern. They respond to every power action, get thumbnails, and survive `pmhvd` restarts like real machines, so everything above QEMU (the daemon, API, UI and CLI) can be developed and tested there. `pmhvd` starts without QEMU installed; only qcow2 images and conversions need `qemu-img`, and dummy machines get raw boot disks.
+
+`just test-dummy` runs the end-to-end test with a dummy machine; it needs no hypervisor.
+
 ### As a background service
 
 ```bash
@@ -119,7 +132,8 @@ All orchestration goes through [`just`](https://github.com/casey/just):
 | `just lint` | Clippy (warnings are errors) and oxlint |
 | `just check` | Type checks: `cargo check` and `tsc` |
 | `just test` | Unit tests |
-| `just test-integration` | Boots UEFI firmware under QEMU through `pmhvd`, the shim and the CLI, restarting `pmhvd` mid-run |
+| `just test-integration` | Boots UEFI firmware under QEMU, and runs a dummy machine, through `pmhvd`, the shim and the CLI, restarting `pmhvd` mid-run |
+| `just test-dummy` | Just the dummy machine test, which needs no hypervisor |
 | `just test-ui` | Builds everything, then drives the web UI in headless Chromium against an isolated `pmhvd` |
 | `just sign` | Signs `pmhv-shim` with the Virtualization.framework entitlement (macOS) |
 | `just licences` | REUSE check on tracked files |

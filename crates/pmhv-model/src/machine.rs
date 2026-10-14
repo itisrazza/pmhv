@@ -9,6 +9,10 @@ pub type MachineId = Ulid;
 pub enum Backend {
     Qemu,
     Vz,
+    /// A simulated machine with a fake serial console and framebuffer, for developing and
+    /// testing pmhv where there's no hypervisor (CI, containers). Enabled with
+    /// `dev.dummy_backend` in config.toml.
+    Dummy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]

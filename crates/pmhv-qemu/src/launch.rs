@@ -85,6 +85,10 @@ pub enum SpecError {
     BiosNeedsX86,
     #[error("NVMe can't hold CD-ROM media; use SATA, USB or VirtIO for disk {index}")]
     NvmeCdrom { index: usize },
+    #[error(
+        "disk {index} is on SATA, which QEMU's ARM UEFI firmware can't see, so it can't boot from it; use VirtIO, NVMe or USB"
+    )]
+    SataOnArm { index: usize },
     #[error("a SATA controller has 6 ports, but {count} SATA disks are attached")]
     TooManySata { count: usize },
     #[error("port forwards need the built-in NAT network")]
@@ -115,6 +119,12 @@ pub fn validate(spec: &MachineSpec) -> Result<(), SpecError> {
         .position(|disk| disk.bus == DiskBus::Nvme && disk.media == DiskMedia::Cdrom)
     {
         return Err(SpecError::NvmeCdrom { index });
+    }
+    // EDK2's ArmVirtQemu has no AHCI driver: SATA disks and CD-ROMs are invisible to it.
+    if spec.arch == Arch::Aarch64
+        && let Some(index) = spec.disks.iter().position(|disk| disk.bus == DiskBus::Sata)
+    {
+        return Err(SpecError::SataOnArm { index });
     }
     let sata = spec
         .disks
@@ -623,7 +633,7 @@ mod tests {
     #[test]
     fn validates_specs() {
         type Case = (&'static str, fn(&mut MachineSpec), Result<(), SpecError>);
-        let cases: [Case; 10] = [
+        let cases: [Case; 11] = [
             ("valid", |_| {}, Ok(())),
             (
                 "blank name",
@@ -656,8 +666,21 @@ mod tests {
                 Err(SpecError::NvmeCdrom { index: 1 }),
             ),
             (
+                "SATA on ARM",
+                |spec| {
+                    spec.disks = vec![
+                        spec_disk(DiskBus::Virtio, DiskMedia::Disk),
+                        spec_disk(DiskBus::Sata, DiskMedia::Cdrom),
+                    ];
+                },
+                Err(SpecError::SataOnArm { index: 1 }),
+            ),
+            (
                 "seven SATA disks",
-                |spec| spec.disks = vec![spec_disk(DiskBus::Sata, DiskMedia::Disk); 7],
+                |spec| {
+                    spec.arch = Arch::X86_64;
+                    spec.disks = vec![spec_disk(DiskBus::Sata, DiskMedia::Disk); 7];
+                },
                 Err(SpecError::TooManySata { count: 7 }),
             ),
             (

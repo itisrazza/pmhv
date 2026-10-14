@@ -5,6 +5,7 @@
  * Poor Man's HyperVisor daemon API
  * OpenAPI spec version: 0.1.0
  */
+import type { Backend } from './backend';
 
 /**
  * Facts about the machine pmhvd is running on.
@@ -12,6 +13,8 @@
 export interface HostInfo {
   /** Host CPU architecture, as Rust names it (`aarch64`, `x86_64`). */
   arch: string;
+  /** Backends machines can use on this host. */
+  backends: Backend[];
   /** Host operating system, as Rust names it (`macos`, `linux`, `windows`). */
   os: string;
   /** pmhvd version. */

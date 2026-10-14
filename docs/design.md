@@ -22,7 +22,7 @@ pmhv (Poor Man's HyperVisor) is a small daemon and web UI for running virtual ma
 - Clustering, live migration, HA — this is one host.
 - Containers.
 - Replacing the host OS or requiring root/admin for basic use.
-- A native desktop app. (A thin menu-bar/tray helper may come later.)
+- A native desktop app. (A thin menu-bar/tray helper is planned after packaging; see the [roadmap](roadmap.md#after-the-mvp).)
 
 ## Reading the mockups
 
@@ -151,6 +151,10 @@ Unix socket paths are limited to 104 bytes on macOS, and `$TMPDIR` there is alre
 - Implemented: Linux and other EFI guests with a text console (Apple's EFI boot loader, a VirtIO console, NAT, entropy). Still to do: macOS guests (installing from an IPSW, then `VZMacOSBootLoader` with the platform's hardware model and machine identifier), the guest-VNC graphical console, and Rosetta.
 - The shim binary must be code-signed with `com.apple.security.virtualization`. Ad-hoc signing works for local development; a `just` recipe handles it. Bridged networking needs `com.apple.vm.networking`, which Apple only grants on request — plan around not having it.
 - Guests: mainly macOS (Apple silicon only, installed from an IPSW, limited to two concurrent macOS VMs by the licence/kernel). Linux guests run on QEMU by default; VZ supports them (ARM64, EFI boot), but it's opt-in, e.g. for Rosetta. Windows ARM isn't a realistic VZ guest (no TPM), so it runs on QEMU.
+
+### Dummy (development)
+
+A simulated machine run entirely inside the shim, enabled with `dev.dummy_backend`, for developing and testing pmhv where there's no hypervisor. It speaks the same shim protocol as the real backends: a serial console with a fake boot and shell, a minimal RFB server (no auth, raw encoding) with a test pattern for graphical consoles, PNG screenshots, and all power actions. `GET /api/v1/host` lists the backends available on the host, and the create dialog only offers those.
 
 ### Linux
 
@@ -282,6 +286,7 @@ The daemon can boot arbitrary code and read arbitrary files on the host, so ever
 - There is a **single user**, with a password, one or more passkeys (WebAuthn), or both. Signing in gives a session cookie; "Disconnect" in the UI ends the session. At least one credential must exist at all times, so removing the last one is refused.
 - Passkeys need a stable origin (a hostname over HTTPS, or `localhost`), so they won't work when pmhv is reached by bare IP address over the LAN. The password covers that case.
 - **First launch:** pmhvd generates a temporary password, prints it to its log and writes it to a `0600` file in the data directory (a launchd agent's output goes to a log file, which is easy to miss). Signing in with it only reaches a setup page, where the user must set their own password or register a passkey. The temporary password stops working as soon as either is done.
+  - On macOS and Windows, the installer's first-run flow (planned, see the [roadmap](roadmap.md#after-the-mvp)) sets the password itself before opening the browser, so users there never handle the temporary password. On Linux, and wherever pmhvd is set up by hand, the temporary password is how first launch works.
 - **Recovery:** `pmhv auth reset`, over the local socket, issues a new temporary password and puts the account back into setup mode. Physical/local access is the recovery path.
 - Default listen address is `127.0.0.1` only. Exposing on the LAN requires TLS (user-provided certificate, or a self-signed one generated on first run).
 - The CLI uses a local socket protected by filesystem permissions, and doesn't need to sign in.

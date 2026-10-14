@@ -68,6 +68,11 @@ test-integration:
     just sign
     cargo test -p pmhvd --test boot -- --ignored
 
+# Run a dummy machine through pmhvd and the shim (no hypervisor needed)
+test-dummy:
+    cargo build --workspace
+    cargo test -p pmhvd --test boot -- --ignored dummy
+
 # Drive the web UI in headless Chromium against an isolated pmhvd (needs QEMU and Chromium;
 # PMHV_CHROMIUM picks the browser)
 test-ui: build-web

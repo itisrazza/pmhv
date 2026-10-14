@@ -75,6 +75,7 @@ pub struct Context {
     pub runtime_dir: PathBuf,
     pub shim: PathBuf,
     pub thumbnail_interval: Duration,
+    pub backends: Vec<Backend>,
 }
 
 struct Entry {
@@ -155,14 +156,15 @@ impl Machines {
         if let Some(disk) = request.new_boot_disk {
             let image = ImageRef {
                 group: DEFAULT_GROUP.to_owned(),
-                // Virtualization.framework can't read qcow2.
+                // Virtualization.framework can't read qcow2, and dummy machines shouldn't need
+                // qemu-img.
                 name: format!(
                     "{} - Disk 0.{}",
                     spec.name.replace(['/', '\\'], "-"),
-                    if spec.backend == Backend::Vz {
-                        "img"
-                    } else {
+                    if spec.backend == Backend::Qemu {
                         "qcow2"
+                    } else {
+                        "img"
                     }
                 ),
             };
@@ -787,8 +789,13 @@ impl Machines {
         MachineRuntimeDir::new(&self.ctx.runtime_dir, id)
     }
 
+    pub fn backends(&self) -> &[Backend] {
+        &self.ctx.backends
+    }
+
     fn resolver(&self) -> Resolver<'_> {
         Resolver {
+            backends: &self.ctx.backends,
             qemu: &self.ctx.qemu,
             store: &self.ctx.store,
             images: &self.ctx.images,

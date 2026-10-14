@@ -41,6 +41,8 @@ pub enum RunError {
     Wait(#[source] io::Error),
     #[error("QMP command failed")]
     Qmp(#[from] QmpError),
+    #[error("dummy machine I/O failed")]
+    DummySetup(#[source] io::Error),
     #[cfg(not(target_os = "macos"))]
     #[error("Apple Virtualization is only available on macOS")]
     VzUnavailable,
@@ -70,6 +72,8 @@ pub enum ControlError {
     VzPanicked,
     #[error("the machine isn't graphical, so there's no screen to capture")]
     NotGraphical,
+    #[error("failed to save the dummy machine's screen")]
+    DummyScreenshot(#[source] io::Error),
     #[error(transparent)]
     Qmp(#[from] QmpError),
 }
@@ -90,6 +94,7 @@ pub struct Machine {
     kill: Notify,
     #[cfg(target_os = "macos")]
     pub(crate) vz: OnceCell<pmhv_vz::Vz>,
+    pub(crate) dummy: OnceCell<crate::dummy::Control>,
 }
 
 impl Machine {
@@ -107,6 +112,7 @@ impl Machine {
             kill: Notify::new(),
             #[cfg(target_os = "macos")]
             vz: OnceCell::new(),
+            dummy: OnceCell::new(),
         })
     }
 
@@ -115,6 +121,9 @@ impl Machine {
     }
 
     pub async fn power(&self, action: ShimPower) -> Result<(), ControlError> {
+        if let Some(dummy) = self.dummy.get() {
+            return dummy.power(action).await;
+        }
         #[cfg(target_os = "macos")]
         if let Some(vz) = self.vz.get() {
             return crate::vz::power(*vz, action).await;
@@ -138,6 +147,9 @@ impl Machine {
     }
 
     pub async fn screenshot(&self, path: &Path) -> Result<(), ControlError> {
+        if let Some(dummy) = self.dummy.get() {
+            return dummy.screenshot(path);
+        }
         if !self.graphical {
             return Err(ControlError::NotGraphical);
         }
@@ -162,6 +174,7 @@ impl Machine {
             Launch::Vz(vz) => self.run_vz(vz).await,
             #[cfg(not(target_os = "macos"))]
             Launch::Vz(_) => Err(RunError::VzUnavailable),
+            Launch::Dummy(dummy) => self.run_dummy(dummy, dir).await,
         }
     }
 

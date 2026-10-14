@@ -219,6 +219,7 @@ function SettingsForm({ machine }: { machine: Machine }) {
 
           <Section title="Disks">
             <DiskListEditor
+              arch={spec.arch}
               disks={spec.disks ?? []}
               images={allImages}
               disabled={locked}
